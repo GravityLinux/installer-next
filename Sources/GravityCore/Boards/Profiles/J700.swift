@@ -10,5 +10,5 @@ enum J700 {
             notes: "Experimental j700 support. Firmware and this radio’s calibration are collected locally.",
             powerButtonHelp: "Hold the power button at the top-right of the keyboard until startup options appear.",
             postInstallNote: "Sleep and native boot still need qualification. Wi-Fi operating calibration currently follows the driver’s qualified 6 GHz group 28 policy. Speaker playback retains the conservative driver volume cap."),
-        availability: .developer)
+        availability: .developer, releases: [.bootloaderOnly])
 }

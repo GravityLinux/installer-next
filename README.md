@@ -35,15 +35,11 @@ releases/
   latest
   installer-<release>.tar.gz
   installer-<release>.tar.gz.sha256
-  installer_data.json
-  os/
-    <packages referenced by the catalog>
 ```
 
-The catalog must declare `supported_boards: ["j700"]` for a j700 image and use
-boot objects included in the app. Relative package names are resolved under
-`os/`; absolute package URLs are also supported. The host must support HEAD and
-HTTP byte ranges for OS archives. One local server option on macOS is:
+OS releases are compiled into each board profile. If a compiled release uses
+remote OS archives, their host must support HEAD and HTTP byte ranges. One local
+server option on macOS is:
 
 ```sh
 ruby -run -e httpd -- --bind-address=127.0.0.1 --port=5050 ./releases
@@ -69,18 +65,35 @@ installed version. The bootstrap saves its download configuration in the app;
 later launches do not need the server's temporary files. The development channel
 enables developer-only boards such as j700.
 
-`INSTALLER_BASE` is required for downloads. By default the catalog is
-`$INSTALLER_BASE/installer_data.json` and the image repository is
-`$INSTALLER_BASE`. Override them with `INSTALLER_DATA` and `REPO_BASE` on the `sh`
-process. Direct launches accept `--catalog URL_OR_PATH --repository URL`.
-There are no built-in catalog/image hosting defaults. Local HTTP is allowed on
-loopback; use an SSH tunnel or HTTPS when the server is on another computer.
+`INSTALLER_BASE` selects the app-update artifacts only. OS image URLs, layouts,
+release choices and supported boards are compiled into the installer; there is
+no remote catalog or runtime firmware/plugin loader. Rebuild and version the
+installer whenever board support or an OS release definition changes. Local
+HTTP is allowed on loopback; use an SSH tunnel or HTTPS for another computer.
 
 Only Gravity installer/OS artifacts belong on this server. Apple restore images
 are downloaded directly from Apple. Per-device firmware and calibration are
 collected on the target Mac, and the generated firmware bundle stays local.
 
 The only GitHub automation is a macOS test and preview-packaging check.
+
+## Credentials and design inventory
+
+Startup inspection and review use read-only queries and never mount volumes or
+read privileged boot policy. Ask for credentials after Review. The GUI/TUI starts
+one private privileged process for that install session; the supplied credentials
+are held in memory for the Apple tools and are cleared after the stage completes.
+The privileged process reconstructs and compares the reviewed plan before making
+changes. Normal macOS uses the administrator account currently logged in;
+recovery runs as root and accepts the paired macOS administrator's credentials.
+1TR is a new boot session and asks once again. Passwords are never written to
+arguments, environment variables, state files or logs.
+
+[The exception-state inventory](docs/installer-exception-states.csv) lists every
+identified error/alternate-flow family, its current UI surface, mutation state,
+possible actions and design notes. Some rows identify states that still need a
+dedicated presentation; the list is a design specification, not an assertion that
+all variants already have finished UI. There is no separate Authorize screen.
 
 ## Board support and firmware qualification
 
@@ -102,7 +115,7 @@ To add a board, add **one or two files**:
 1. `Sources/GravityCore/Boards/Profiles/J<number>.swift`, defining
    `enum J<number>` with `static let profile: BoardProfile`. Set the lowercase
    product number as `id`, exact hardware match, restore pins, boot assets,
-   presentation details and any storage policy in that profile. Use
+   presentation details, compiled `releases`, and any storage policy in that profile. Use
    `availability: .developer` until support is ready for normal users.
 2. If its firmware needs different handling, add `Boards/J<number>Firmware.swift`
    implementing `BoardFirmwareLoading`. Existing loaders can be reused.
@@ -111,7 +124,7 @@ The SwiftPM `BoardDiscovery` plugin automatically registers every profile file.
 There is no central board list or per-board change to the package manifest,
 installer engine, GUI or TUI. Presentation gets its product number directly from
 the profile ID. Shared restore definitions can be reused or a new restore can be
-declared in the board's profile file. Catalog entries and bundled boot assets
+declared in the board's profile file. Compiled release definitions and bundled boot assets
 still need to match the board, and hardware support needs device qualification.
 Developer selection is saved for recovery finalization, so the second stage
 retains the choice made when installing.
@@ -149,8 +162,7 @@ This command does not partition disks or register a boot object. It produces
 metadata. Success requires an archive-only rebuild to reproduce all three
 firmware outputs byte for byte. Do not confuse this with qualification of
 native Linux boot, OS installation, suspend or all wireless operating modes.
-`j700` OS catalog entries must explicitly declare board support; the legacy
-catalog fallback is retained for `j773g` only.
+Board-specific OS choices live in `BoardProfile.releases`.
 
 ## Legal
 
@@ -161,3 +173,16 @@ included in the app's copy of that file.
 
 Artwork, the bootloader submodule, and embedded design fonts retain their own
 licenses.
+
+## Defining an OS release
+
+Add a typed `SoftwareTemplate` to the board's `releases` array. It specifies an
+explicit installation mode, absolute package URL, boot object, partitions and
+optional next-stage loader. `PartitionTemplate` specifies image/archive members,
+size, expansion and firmware/installer-data copy policies. The engine validates
+the compiled layout before showing a plan. New definitions require a new build.
+
+The current profiles contain `.bootloaderOnly`, which uses the included stage-1
+binary and leaves the remaining selected space free. Linux and UEFI image
+choices must be added with their actual, board-qualified artifacts; no fake
+image URLs or placeholder Linux installations are offered.

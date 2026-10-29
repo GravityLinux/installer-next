@@ -38,11 +38,9 @@ public struct InstallerDistribution: Codable, Equatable, Sendable {
     public let channel: String
     public let installerBaseURL: URL
     public let latestURL: URL
-    public let catalogURL: URL?
-    public let repositoryURL: URL?
-    public init(installationPath: String, channel: String, installerBaseURL: URL, latestURL: URL, catalogURL: URL? = nil, repositoryURL: URL? = nil) {
+    public init(installationPath: String, channel: String, installerBaseURL: URL, latestURL: URL) {
         schemaVersion = 1; self.installationPath = installationPath; self.channel = channel
-        self.installerBaseURL = installerBaseURL; self.latestURL = latestURL; self.catalogURL = catalogURL; self.repositoryURL = repositoryURL
+        self.installerBaseURL = installerBaseURL; self.latestURL = latestURL
     }
     public static func location(in app: URL) -> URL { app.appending("Contents/Resources/installation.json") }
     public static func read(from app: URL) throws -> InstallerDistribution? {
@@ -54,7 +52,7 @@ public struct InstallerDistribution: Codable, Equatable, Sendable {
     func validate() throws {
         try require(schemaVersion == 1 && installationPath.hasPrefix("/") && URL(fileURLWithPath: installationPath).pathExtension == "app", "Invalid installer installation record")
         try require(["stable", "development", "local"].contains(channel), "Unknown installer release channel")
-        for url in [installerBaseURL, latestURL, catalogURL, repositoryURL].compactMap({ $0 }) {
+        for url in [installerBaseURL, latestURL] {
             try require(url.isFileURL || url.scheme == "https" || (url.scheme == "http" && ["localhost", "127.0.0.1", "::1"].contains(url.host ?? "")), "Installer endpoints require HTTPS")
         }
     }

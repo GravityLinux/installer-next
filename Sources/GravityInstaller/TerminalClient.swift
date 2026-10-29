@@ -8,7 +8,7 @@ final class TerminalOutput: @unchecked Sendable {
     init(api: Bool) { self.api = api }
     func printJSON(_ object: Any) {
         lock.lock(); defer { lock.unlock() }
-        if let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) { FileHandle.standardOutput.write(data + Data([10])) }
+        if let data = try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) { try? FileHandle.standardOutput.write(contentsOf: data + Data([10])) }
     }
     func value<T: Encodable>(_ value: T) throws -> Any { try JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) }
     func event(_ event: InstallEvent) {
@@ -28,6 +28,8 @@ final class TerminalOutput: @unchecked Sendable {
 struct APIRequest: Decodable {
     let id: String, method: String
     let selection: InstallSelection?
+    let reviewedPlan: InstallPlan?
+    let reviewedMaintenance: MaintenancePlan?
     let planID: String?, username: String?, password: String?, installationID: String?, operation: String?
 }
 enum TerminalClient {
@@ -35,14 +37,14 @@ enum TerminalClient {
     Gravity Linux Installer
       gravity-installer                         Open SwiftUI installer
       gravity-installer --version               Show installer version and build
-      sudo gravity-installer --tui              Interactive terminal installer
-      sudo gravity-installer --api              JSON Lines API on stdin/stdout
-      sudo gravity-installer --inspect          Print machine inspection as JSON
+      gravity-installer --tui              Interactive terminal installer
+      gravity-installer --api              JSON Lines API on stdin/stdout
+      gravity-installer --inspect          Print machine inspection as JSON
       gravity-installer --demo [--tui|--api]     Preview with no disk access
       gravity-installer --stage2 /Volumes/Gravity\\ Linux/Finish\\ Installation.app/Contents/Resources/stage2.json [--tui]
       gravity-installer --handoff-bundle DEST [--ipsw URL_OR_PATH]
       gravity-installer --fwextract SOURCE DEST  Rebuild saved firmware (optional: --board PROFILE_ID)
-    Options: --resources PATH --catalog URL_OR_PATH --repository URL --developer|--no-developer
+    Options: --resources PATH --developer|--no-developer
     Stage2 is automatic when launched from the installed recovery app.
     """
     static func prompt(_ text: String, default fallback: String? = nil) throws -> String {
@@ -66,7 +68,7 @@ enum TerminalClient {
     }
     static func run(_ options: LaunchOptions) async throws {
         let output = TerminalOutput(api: options.api || options.inspect || options.handoff != nil)
-        let engine = InstallerEngine(configuration: options.configuration, events: { if !options.inspect { output.event($0) } })
+        let engine = InstallerSession(configuration: options.configuration, events: { if !options.inspect { output.event($0) } })
         if options.api { await serve(engine, output: output); return }
         if let destination = options.handoff {
             try await engine.collectHandoffBundle(destination: destination, ipsw: options.handoffIPSW)
@@ -124,21 +126,28 @@ enum TerminalClient {
         Keep these steps on your phone: \(GuideLinks.recovery.absoluteString)
         """
     }
-    static func serve(_ engine: InstallerEngine, output: TerminalOutput) async {
+    static func serve(_ engine: InstallerSession, output: TerminalOutput) async {
         output.printJSON(["type": "hello", "version": 1])
+        var sessionCredentials: Credentials?
+        defer { sessionCredentials = nil }
         while let line = readLine() {
             var id = ""
             do {
                 let request = try JSONDecoder().decode(APIRequest.self, from: Data(line.utf8)); id = request.id
                 func auth() throws -> Credentials {
-                    guard let user = request.username, let password = request.password else { throw InstallerError("username and password are required on stdin") }; return Credentials(username: user, password: password)
+                    if let user = request.username, let password = request.password { sessionCredentials = Credentials(username: user, password: password) }
+                    guard let credentials = sessionCredentials else { throw InstallerError("username and password are required on stdin") }; return credentials
                 }
                 func planID() throws -> String { guard let id = request.planID else { throw InstallerError("planID is required") }; return id }
                 let result: Any
                 switch request.method {
+                case "authorize": result = ["pid": try await engine.authorize(credentials: auth()), "authorized": true]
+                case "privilegedSession": result = ["pid": try await engine.authorizationStatus()]
                 case "checkBoardSupport": result = try output.value(await engine.checkBoardSupport())
                 case "inspect": result = try output.value(await engine.inspect())
                 case "plan": guard let selection = request.selection else { throw InstallerError("selection is required") }; result = try output.value(await engine.plan(selection))
+                case "installReviewed": guard let plan = request.reviewedPlan else { throw InstallerError("reviewedPlan is required") }; try await engine.installReviewed(plan, credentials: auth()); result = ["status": "restartRequired"]
+                case "maintainReviewed": guard let plan = request.reviewedMaintenance else { throw InstallerError("reviewedMaintenance is required") }; try await engine.maintainReviewed(plan, credentials: auth()); result = ["status": "done"]
                 case "install": try await engine.install(planID: planID(), credentials: auth()); result = ["status": "restartRequired"]
                 case "stage2Status": result = try output.value(await engine.stage2Status())
                 case "finalize": try await engine.finalize(credentials: auth()); result = ["status": "complete"]
@@ -149,6 +158,7 @@ enum TerminalClient {
                 default: throw InstallerError("Unknown API method")
                 }
                 output.printJSON(["type": "result", "version": 1, "id": id, "result": result])
+                if ["install", "installReviewed", "maintain", "maintainReviewed", "finalize"].contains(request.method) { sessionCredentials = nil }
             } catch {
                 var response: [String: Any] = ["type": "error", "version": 1, "id": id, "message": error.localizedDescription]
                 if let issue = error as? BoardSupportError { response["boardSupport"] = try? output.value(issue) }

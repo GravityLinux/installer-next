@@ -11,20 +11,10 @@ fi
 if [ "$(uname -m)" != arm64 ]; then
     exec /usr/bin/arch -arm64 /bin/sh "$PWD/$(basename "$0")" "$@"
 fi
-if [ -f installer_data.json ]; then
-    set -- --catalog "$PWD/installer_data.json" "$@"
-elif [ -n "${INSTALLER_DATA:-}" ]; then
-    set -- --catalog "$INSTALLER_DATA" "$@"
-fi
-if [ -n "${REPO_BASE:-}" ]; then set -- --repository "$REPO_BASE" "$@"; fi
 terminal=0
-privileged=0
-demo=0
 for argument in "$@"; do
     case "$argument" in
-        --tui) terminal=1; privileged=1 ;;
-        --api|--inspect) privileged=1 ;;
-        --demo) demo=1 ;;
+        --tui) terminal=1 ;;
     esac
 done
 if [ "$terminal" = 1 ]; then
@@ -35,8 +25,5 @@ if [ "$terminal" = 1 ]; then
         exit 1
     fi
     exec </dev/tty >/dev/tty 2>/dev/tty
-fi
-if [ "$demo" = 0 ] && [ "$privileged" = 1 ] && [ "$(id -u)" != 0 ]; then
-    exec /usr/bin/sudo "$binary" "$@"
 fi
 exec "$binary" "$@"

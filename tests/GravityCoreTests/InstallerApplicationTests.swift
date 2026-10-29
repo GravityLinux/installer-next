@@ -22,7 +22,7 @@ private func appFixture(_ root: URL, version: String = "0.1.0", release: String 
 }
 private func distribution(_ app: URL, channel: String = "stable") -> InstallerDistribution {
     InstallerDistribution(installationPath: app.path, channel: channel, installerBaseURL: URL(string: "https://downloads.example.test/installer")!,
-        latestURL: URL(string: "https://downloads.example.test/installer/latest")!, catalogURL: URL(string: "https://downloads.example.test/installer/installer_data.json")!, repositoryURL: URL(string: "https://downloads.example.test")!)
+        latestURL: URL(string: "https://downloads.example.test/installer/latest")!)
 }
 @Test func appInstallsPersistentlyAndSurvivesDownloadRemoval() throws {
     let temp = try TemporaryDirectory(), source = try appFixture(temp.url.appending("download")), destination = temp.url.appending("Applications/Gravity Installer.app")
@@ -36,13 +36,11 @@ private func distribution(_ app: URL, channel: String = "stable") -> InstallerDi
 }
 @Test func installerCanPersistWithoutHardcodedOSDownloadEndpoints() throws {
     let temp = try TemporaryDirectory(), source = try appFixture(temp.url.appending("download")), destination = temp.url.appending("Applications/Gravity Installer.app")
-    let config = EngineConfiguration(resourceDirectory: temp.url)
-    #expect(config.catalogURL == nil && config.repositoryURL == nil)
     let distribution = InstallerDistribution(installationPath: destination.path, channel: "local",
         installerBaseURL: URL(string: "http://localhost:5050")!, latestURL: URL(string: "http://localhost:5050/latest")!)
     _ = try InstallerApplication.install(source: source, destination: destination, expectedRelease: "release-1", distribution: distribution, commands: ApplicationCommands())
     let saved = try InstallerDistribution.read(from: destination)
-    #expect(saved?.catalogURL == nil && saved?.repositoryURL == nil && saved == distribution)
+    #expect(saved == distribution)
 }
 @Test func executableSignatureSurvivesDeploymentAndRecoveryResourcesButRejectsTampering() throws {
     let temp = try TemporaryDirectory(), source = try appFixture(temp.url.appending("download")), destination = temp.url.appending("Applications/Gravity Installer.app")

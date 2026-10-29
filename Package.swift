@@ -14,7 +14,7 @@ let package = Package(
         .target(name: "GravityCore", dependencies: ["CInstallerSupport"], plugins: ["BoardDiscovery"]),
         .executableTarget(name: "BoardRegistryGenerator", path: "tools/BoardRegistryGenerator"),
         .plugin(name: "BoardDiscovery", capability: .buildTool(), dependencies: ["BoardRegistryGenerator"]),
-        .executableTarget(name: "GravityInstaller", dependencies: ["GravityCore"]),
+        .executableTarget(name: "GravityInstaller", dependencies: ["GravityCore", "CInstallerSupport"]),
         .testTarget(name: "GravityCoreTests", dependencies: ["GravityCore"], path: "tests/GravityCoreTests")
     ]
 )

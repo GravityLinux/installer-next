@@ -18,7 +18,7 @@ struct MacSystem {
         return HardwareIdentity(deviceClass: String(decoding: compatible.prefix { $0 != 0 }, as: UTF8.self),
             chipID: Int64(try chip.uint(0, 4)), boardID: Int64(try board.uint(0, 4)))
     }
-    init(commands: CommandRunning) throws {
+    init(commands: CommandRunning, readOnly: Bool = false) throws {
         tree = try Self.deviceTree(try commands.run("/usr/sbin/ioreg", ["-alp", "IODeviceTree"], input: nil))
         guard let platform = array(tree["IORegistryEntryChildren"]).first(where: { string($0["IOObjectClass"]) == "IOPlatformExpertDevice" }),
               let chosen = array(platform["IORegistryEntryChildren"]).first(where: { string($0["IORegistryEntryName"]) == "chosen" }),
@@ -37,10 +37,13 @@ struct MacSystem {
         let boot = text(nvram["boot-volume"]).components(separatedBy: ":")
         defaultBoot = boot.count >= 3 ? boot[2] : ""
         var policy = ""
-        for vgid in [bootVGID, defaultBoot] where !vgid.isEmpty {
+        for vgid in [bootVGID, defaultBoot] where !readOnly && !vgid.isEmpty {
             if let data = try? commands.run("/usr/bin/bputil", ["-d", "-v", vgid], input: nil) { policy = String(decoding: data, as: UTF8.self); break }
         }
-        bootMode = Self.environment(policy)
+        if readOnly {
+            let root = try plist(commands.run("/usr/sbin/diskutil", ["info", "-plist", "/"], input: nil))
+            bootMode = root["APFSSnapshot"] as? Bool == true && !string(root["APFSVolumeGroupID"]).isEmpty ? "macOS" : Self.environment(policy)
+        } else { bootMode = Self.environment(policy) }
         macOS = string(try plist(URL(fileURLWithPath: "/System/Library/CoreServices/SystemVersion.plist"))["ProductVersion"])
         let console = String(decoding: try commands.run("/usr/sbin/scutil", [], input: Data("show State:/Users/ConsoleUser\n".utf8)), as: UTF8.self)
         loginUser = console.components(separatedBy: "\n").first { $0.contains("kCGSSessionUserNameKey : ") }?.components(separatedBy: " : ").last?.trimmingCharacters(in: .whitespaces) ?? ""
@@ -168,7 +171,7 @@ final class DiskManager {
         }
         try refresh(); return try partition(part.name)
     }
-    func operatingSystems(_ part: DiskPartition, system: MacSystem) throws -> [InstalledOS] {
+    func operatingSystems(_ part: DiskPartition, system: MacSystem, readOnly: Bool = false) throws -> [InstalledOS] {
         if part.container.isEmpty || part.type != "Apple_APFS" { return [] }
         let volumes = array(part.container["Volumes"])
         guard let preboot = volumes.first(where: { $0["Roles"] as? [String] == ["Preboot"] }), let recovery = volumes.first(where: { $0["Roles"] as? [String] == ["Recovery"] }) else { return [] }
@@ -186,14 +189,29 @@ final class DiskManager {
                 let mounted = array(snapshots?["MountedSnapshots"])
                 if mounted.count == 1 { mountName = string(mounted[0]["SnapshotBSD"]) }
             }
-            let systemMount = try mount(mountName), prebootMount = try mount(string(preboot["DeviceIdentifier"])), recoveryMount = try mount(string(recovery["DeviceIdentifier"]))
-            let dataMount = try? mount(dataName)
+            let systemMount: URL, prebootMount: URL, recoveryMount: URL, dataMount: URL?
+            if readOnly {
+                func mounted(_ name: String) throws -> URL? {
+                    let path = string(try get(["info", "-plist", name])["MountPoint"])
+                    return path.isEmpty ? nil : URL(fileURLWithPath: path)
+                }
+                let root = try get(["info", "-plist", "/"])
+                let current = string(root["APFSVolumeGroupID"]) == vgid
+                guard let mountedSystem = try mounted(mountName) ?? (current ? URL(fileURLWithPath: "/") : nil),
+                      let mountedPreboot = try mounted(string(preboot["DeviceIdentifier"])) ?? (current ? URL(fileURLWithPath: "/System/Volumes/Preboot") : nil) else { continue }
+                systemMount = mountedSystem; prebootMount = mountedPreboot
+                recoveryMount = try mounted(string(recovery["DeviceIdentifier"])) ?? URL(fileURLWithPath: "/System/Volumes/Recovery")
+                dataMount = try mounted(dataName) ?? (current ? URL(fileURLWithPath: "/System/Volumes/Data") : nil)
+            } else {
+                systemMount = try mount(mountName); prebootMount = try mount(string(preboot["DeviceIdentifier"])); recoveryMount = try mount(string(recovery["DeviceIdentifier"]))
+                dataMount = try? mount(dataName)
+            }
             var version = ""
             for filename in ["SystemVersion.plist", "SystemVersion-disabled.plist"] {
                 if let value = try? plist(systemMount.appending("System/Library/CoreServices/" + filename)) { version = string(value["ProductVersion"]); break }
             }
             let admins = (try? plist(prebootMount.appending("\(vgid)/var/db/AdminUserRecoveryInfo.plist")))?.keys.sorted() ?? []
-            let policy = String(decoding: (try? commands.run("/usr/bin/bputil", ["-d", "-v", vgid], input: nil)) ?? Data(), as: UTF8.self)
+            let policy = readOnly ? "" : String(decoding: (try? commands.run("/usr/bin/bputil", ["-d", "-v", vgid], input: nil)) ?? Data(), as: UTF8.self)
             let registered = policy.components(separatedBy: "\n").contains { $0.contains("(coih): ") && !$0.contains("absent") }
             result.append(InstalledOS(partition: part, vgid: vgid, label: string(systemVolume["Name"]), systemDevice: systemName, dataDevice: dataName, system: systemMount, data: dataMount, preboot: prebootMount, recovery: recoveryMount, recoveryUUID: string(recovery["APFSVolumeUUID"]), prebootUUID: string(preboot["APFSVolumeUUID"]), stub: !fm.fileExists(atPath: systemMount.appending("Library").path), version: version, administrators: admins, paired: policy.contains(": Paired"), registered: registered))
         }

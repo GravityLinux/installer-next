@@ -211,15 +211,12 @@ func stage2Fixture(_ temp: TemporaryDirectory) throws -> URL {
 }
 
 @Test func partitionModesKeepFutureOSSpaceFree() throws {
-    let partitionList = """
-    [{"name":"EFI","type":"EFI","size":"500MB","expand":true},
-     {"name":"Linux","type":"Linux","size":"5GB","expand":true}]
-    """
-    func template(_ mode: String) throws -> SoftwareTemplate {
-        let data = Data("{\"name\":\"Fixture\",\"default_os_name\":\"Gravity Linux\",\"boot_object\":\"m1n1.bin\",\"install_mode\":\"\(mode)\",\"partitions\":\(partitionList)}".utf8)
-        return try JSONDecoder().decode(SoftwareTemplate.self, from: data)
+    let partitions = [PartitionTemplate(name: "EFI", type: "EFI", size: "500MB", expand: true),
+        PartitionTemplate(name: "Linux", type: "Linux", size: "5GB", expand: true)]
+    func template(_ mode: InstallationMode) -> SoftwareTemplate {
+        SoftwareTemplate(name: "Fixture", mode: mode, partitions: partitions)
     }
-    let uefi = try template("uefi"), bootloader = try template("bootloader"), linux = try template("linux")
+    let uefi = template(.uefi), bootloader = template(.bootloader), linux = template(.linux)
     #expect(uefi.layout.count == 1 && uefi.layout[0].type == "EFI" && !uefi.expandable)
     #expect(try uefi.minimum == alignUp(500_000_000))
     #expect(bootloader.layout.isEmpty && !bootloader.expandable)

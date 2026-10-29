@@ -25,8 +25,6 @@ struct LaunchOptions {
         configuration = EngineConfiguration(resourceDirectory: resources, appBundle: bundle, stage2URL: FileManager.default.fileExists(atPath: stage2.path) ? stage2 : nil)
         configuration.demo = Bundle.main.object(forInfoDictionaryKey: "GravityDemo") as? Bool == true
         if let bundle, let distribution = try InstallerDistribution.read(from: bundle) {
-            configuration.catalogURL = distribution.catalogURL
-            configuration.repositoryURL = distribution.repositoryURL
             configuration.developer = distribution.channel != "stable"
         }
         var i = 0
@@ -43,12 +41,6 @@ struct LaunchOptions {
             case "--developer": configuration.developer = true
             case "--no-developer": configuration.developer = false
             case "--resources": configuration.resourceDirectory = URL(fileURLWithPath: try value()).standardizedFileURL
-            case "--catalog":
-                let input = try value()
-                if input.contains("://") {
-                    guard let url = URL(string: input), url.isFileURL || url.host != nil else { throw InstallerError("Invalid catalog URL") }; configuration.catalogURL = url
-                } else { configuration.catalogURL = URL(fileURLWithPath: input) }
-            case "--repository": guard let url = URL(string: try value()), url.scheme != nil else { throw InstallerError("Invalid repository URL") }; configuration.repositoryURL = url
             case "--stage2":
                 if i + 1 < arguments.count && !arguments[i+1].hasPrefix("--") { configuration.stage2URL = URL(fileURLWithPath: try value()).standardizedFileURL }
                 else if configuration.stage2URL == nil && !configuration.demo { throw InstallerError("--stage2 requires the installed stage2.json path") }
@@ -82,6 +74,7 @@ struct LaunchOptions {
 @main struct Launcher {
     private static var applicationLock: InstallerApplicationLock?
     static func main() {
+        signal(SIGPIPE, SIG_IGN)
         do {
             if CommandLine.arguments.dropFirst().first != "--deploy-app" {
                 applicationLock = try InstallerApplicationLock.acquireIfInstalled(app: Bundle.main.bundleURL.pathExtension == "app" ? Bundle.main.bundleURL : nil)
@@ -93,8 +86,7 @@ struct LaunchOptions {
                       let channel = options.updateChannel, let base = options.installerBase, let latest = options.latestURL else {
                     throw InstallerError("App deployment requires a packaged app, release ID, channel, and update endpoints")
                 }
-                let distribution = InstallerDistribution(installationPath: destination.path, channel: channel, installerBaseURL: base, latestURL: latest,
-                    catalogURL: options.configuration.catalogURL, repositoryURL: options.configuration.repositoryURL)
+                let distribution = InstallerDistribution(installationPath: destination.path, channel: channel, installerBaseURL: base, latestURL: latest)
                 let result = try InstallerApplication.install(source: source, destination: destination, expectedRelease: expectedRelease, distribution: distribution, force: options.forceDeployment)
                 FileHandle.standardOutput.write(try JSONEncoder().encode(result) + Data([10])); return
             }

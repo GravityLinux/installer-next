@@ -19,7 +19,7 @@ public actor InstallerEngine {
         self.events = { event in log.append(event); events(event) }
     }
     private func root() throws { try require(configuration.demo || geteuid() == 0, "Administrator authorization is required. Run this client with sudo, or authorize in the graphical app.") }
-    /// Read-only preflight, usable before authorization or catalog downloads.
+    /// Read-only preflight, usable before authorization or downloads.
     public func checkBoardSupport() throws -> BoardPresentation {
         if configuration.demo { return try demoBoard().presentation }
         if let url = configuration.stage2URL { return try Stage2Context(url, boards: boards, developer: configuration.developer).board.presentation }
@@ -33,46 +33,36 @@ public actor InstallerEngine {
             Data(([board.id, system.hardware.deviceClass, String(system.hardware.chipID), String(system.hardware.boardID)] + partitions.map { "\($0.name):\($0.offset):\($0.size):\($0.type):\($0.uuid)" }).joined(separator: "\n").utf8).sha256
         }
     }
-    private func scan() throws -> Scan {
-        try root(); events(InstallEvent(.inspecting))
-        let system = try MacSystem(commands: commands)
+    private func scan(readOnly: Bool = false) throws -> Scan {
+        if !readOnly { try root() }; events(InstallEvent(.inspecting))
+        let system = try MacSystem(commands: commands, readOnly: readOnly)
         let board = try boards.resolve(system.hardware, developer: configuration.developer); try system.validate(board: board)
         let disk = DiskManager(commands: commands); try disk.refresh(); let name = try disk.systemDisk(), parts = try disk.partitions(name)
         try require(string(disk.disks[name]?["Content"]) == "GUID_partition_scheme", "The internal disk must use a GUID partition map")
-        let systems = try parts.flatMap { try disk.operatingSystems($0, system: system) }
+        let systems = try parts.flatMap { try disk.operatingSystems($0, system: system, readOnly: readOnly) }
         let macOS = systems.filter { !$0.stub && !$0.version.isEmpty }
-        let current = macOS.first { $0.vgid == system.bootUUID || $0.vgid == system.bootVGID } ?? macOS.first { $0.vgid == system.defaultBoot }
+        let rootGroup = readOnly ? string(try disk.get(["info", "-plist", "/"])["APFSVolumeGroupID"]) : ""
+        let current = macOS.first { $0.vgid == system.bootUUID || $0.vgid == system.bootVGID || (!rootGroup.isEmpty && $0.vgid == rootGroup) } ?? macOS.first { $0.vgid == system.defaultBoot }
         guard let current else { throw InstallerError("Could not identify the macOS installation used for machine-owner authentication. Start from your primary macOS installation or its paired recovery.") }
         try require(!current.administrators.filter { $0 != "_mbsetupuser" }.isEmpty, "No machine-owner administrator records found. Run diskutil apfs updatePreboot on your macOS volume and try again.")
         if system.bootMode == "macOS" { try require(current.administrators.contains(system.loginUser), "The local macOS session must belong to a machine-owner administrator") }
         return Scan(board: board, system: system, disk: disk, name: name, partitions: parts, systems: systems, current: current)
     }
-    private func loadCatalog(for board: BoardProfile) throws {
-        events(InstallEvent(.metadata))
-        guard let url = configuration.catalogURL else { throw InstallerError("No OS catalog configured. Set --catalog to your installer_data.json URL or file.") }
-        let data: Data
-        if url.isFileURL { data = try Data(contentsOf: url) }
-        else {
-            try require(url.scheme == "https" || ["localhost", "127.0.0.1"].contains(url.host ?? ""), "Catalog requires HTTPS")
-            let session = URLSession(configuration: .ephemeral); defer { session.invalidateAndCancel() }
-            let (body, response) = try HTTPRangeSource.request(URLRequest(url: url), session: session)
-            try require(response.statusCode == 200 && body.count <= 8_000_000, "Could not load the release catalog"); data = body
-        }
-        let catalog = try JSONDecoder().decode(Catalog.self, from: data)
+    private func loadReleases(for board: BoardProfile) throws {
         templates = [:]
-        for (index, template) in catalog.os_list.enumerated() {
+        for (index, template) in board.releases.enumerated() {
             if template.expert == true && !configuration.developer { continue }
-            if !template.supports(board) { continue }
-            try require((template.mode != .linux || !template.layout.isEmpty) && template.layout.filter { $0.expand == true }.count <= 1, "Invalid release partition template")
+            guard board.installationModes.contains(template.mode) else { continue }
+            try require((template.mode != .linux || !template.layout.isEmpty) && template.layout.filter { $0.expand == true }.count <= 1, "Invalid compiled release partition definition")
             if template.mode == .uefi { try require(template.layout.count == 1, "UEFI-only installation requires exactly one ESP") }
             for part in template.layout {
-                try require(try part.bytes > 0, "Invalid release partition size")
+                try require(try part.bytes > 0, "Invalid compiled partition size")
                 try require(part.format == nil || part.format == "fat", "Unsupported partition format")
             }
-            let id = String(index) + ":" + Data(template.name.utf8).sha256.prefix(12)
+            if let package = template.package { try require(URL(string: package)?.scheme != nil, "Compiled package URLs must be absolute") }
+            let id = board.id + ":" + String(index) + ":" + Data(template.name.utf8).sha256.prefix(12)
             templates[id] = template
         }
-        try require(!templates.isEmpty, "The release catalog has no compatible software for this Mac")
     }
     private func targets(_ scan: Scan) throws -> [StorageTarget] {
         var result: [StorageTarget] = []
@@ -90,13 +80,12 @@ public actor InstallerEngine {
     }
     public func inspect() throws -> Inspection {
         if configuration.demo { return try demoInspection() }
-        let scan = try scan()
+        let scan = try scan(readOnly: true)
         let existing = scan.systems.filter { $0.stub && fm.fileExists(atPath: $0.resources.appending("boot.bin").path) }.map { os in
             let record = try? JSONDecoder().decode(Stage2Record.self, from: Data(contentsOf: os.resources.appending("stage2.json")))
-            return ExistingInstallation(id: os.vgid, name: os.label, needsFinalization: !os.registered || record?.complete == false, canUninstall: record?.ready == true && record?.managedLayout == true)
+            return ExistingInstallation(id: os.vgid, name: os.label, needsFinalization: record.map { !$0.complete } ?? !os.registered, canUninstall: record?.ready == true && record?.managedLayout == true)
         }
-        if configuration.catalogURL != nil || existing.isEmpty { try loadCatalog(for: scan.board) }
-        else { templates = [:] }
+        try loadReleases(for: scan.board)
         let software = try templates.sorted { $0.key < $1.key }.map { try $0.value.software(id: $0.key, storage: scan.board.storage) }
         return Inspection(model: scan.board.id, bootMode: scan.system.bootMode, administrator: scan.system.loginUser.isEmpty ? scan.current.administrators[0] : scan.system.loginUser, administrators: scan.current.administrators, targets: try targets(scan), software: software, existing: existing, board: scan.board.presentation, boardProfileID: scan.board.id, macOSReserveBytes: scan.board.storage.macOSReserveBytes)
     }
@@ -107,10 +96,10 @@ public actor InstallerEngine {
             let plan = try makePlan(selection, target: target, software: software, expandable: true)
             plans[plan.id] = (plan, "demo"); return plan
         }
-        let scan = try scan()
-        guard let target = try targets(scan).first(where: { $0.id == selection.targetID }), let template = templates[selection.softwareID], template.supports(scan.board) else { throw InstallerError("Your selection changed; check this Mac again") }
-        let plan = try makePlan(selection, target: target, software: template.software(id: selection.softwareID, storage: scan.board.storage), expandable: template.expandable, layoutBytes: scan.board.storage.stubBytes + template.minimum)
-        plans.removeAll(); plans[plan.id] = (plan, scan.fingerprint); return plan
+        let scan = try scan(readOnly: true)
+        guard let target = try targets(scan).first(where: { $0.id == selection.targetID }), let template = templates[selection.softwareID], scan.board.releases.contains(where: { $0.name == template.name && $0.mode == template.mode }) else { throw InstallerError("Your selection changed; check this Mac again") }
+        var plan = try makePlan(selection, target: target, software: template.software(id: selection.softwareID, storage: scan.board.storage), expandable: template.expandable, layoutBytes: scan.board.storage.stubBytes + template.minimum)
+        plan.fingerprint = scan.fingerprint; plans.removeAll(); plans[plan.id] = (plan, scan.fingerprint); return plan
     }
     private func makePlan(_ selection: InstallSelection, target: StorageTarget, software: Software, expandable: Bool, layoutBytes: Int64? = nil) throws -> InstallPlan {
         var selection = selection; selection.bytes = alignDown(selection.bytes)
@@ -249,10 +238,7 @@ public actor InstallerEngine {
         events(InstallEvent(.restart, fraction: 1))
     }
     private func resolvePackage(_ name: String) throws -> URL {
-        if let url = URL(string: name), url.scheme != nil { return url }
-        try require(!name.hasPrefix("/") && !name.split(separator: "/").contains(".."), "Invalid package path")
-        guard let repository = configuration.repositoryURL else { throw InstallerError("No OS image repository configured. Set --repository or use an absolute package URL in the catalog.") }
-        return repository.appending("os/" + name)
+        guard let url = URL(string: name), url.scheme != nil else { throw InstallerError("The compiled release has no absolute package URL") }; return url
     }
     private func prepareBoot(_ os: InstalledOS, credentials: Credentials, recovery: Bool) throws {
         let core = os.system.appending("System/Library/CoreServices"), enabled = core.appending("SystemVersion.plist"), disabled = core.appending("SystemVersion-disabled.plist")
@@ -268,7 +254,11 @@ public actor InstallerEngine {
     }
     public func stage2Status() throws -> Stage2Status {
         if configuration.demo { return Stage2Status(name: "Gravity Linux", ready: true, in1TR: true, paired: true, complete: false, board: try demoBoard().presentation, boardProfileID: try demoBoard().id) }
-        try root(); guard let url = configuration.stage2URL else { throw InstallerError("Pass --stage2 with the installed stage2.json path") }
+        guard let url = configuration.stage2URL else { throw InstallerError("Pass --stage2 with the installed stage2.json path") }
+        if geteuid() != 0 {
+            let context = try Stage2Context(url, boards: boards, developer: configuration.developer)
+            return Stage2Status(name: context.record.name, ready: context.record.ready, in1TR: false, paired: false, complete: context.record.complete, board: context.board.presentation, boardProfileID: context.board.id)
+        }
         let context = try Stage2Context(url, boards: boards, developer: configuration.developer), policy = try context.status(commands: commands)
         return Stage2Status(name: context.record.name, ready: context.record.ready, in1TR: MacSystem.environment(policy) == "one true recoveryOS", paired: policy.contains(": Paired"), complete: context.record.complete, board: context.board.presentation, boardProfileID: context.board.id)
     }
@@ -309,12 +299,31 @@ public struct Stage2Status: Codable, Sendable {
 public struct MaintenancePlan: Codable, Identifiable, Sendable {
     public let id: String, installationID: String, operation: String, changes: [String]
     let fingerprint: String
+    public func hasSameReview(as other: MaintenancePlan) -> Bool {
+        installationID == other.installationID && operation == other.operation && changes == other.changes && fingerprint == other.fingerprint
+    }
+}
+extension InstallerEngine {
+    /// A new privileged process reconstructs the plan; a GUI-created plan ID
+    /// cannot grant authority or bypass changed-layout and review checks.
+    public func installReviewed(_ reviewed: InstallPlan, credentials: Credentials) throws {
+        try root(); _ = try inspect()
+        let fresh = try plan(reviewed.selection)
+        try require(fresh.hasSameReview(as: reviewed), "The installation plan changed after review. Review it again before installing.")
+        try install(planID: fresh.id, credentials: credentials)
+    }
+    public func maintainReviewed(_ reviewed: MaintenancePlan, credentials: Credentials) throws {
+        try root()
+        let fresh = try planMaintenance(installationID: reviewed.installationID, operation: reviewed.operation)
+        try require(fresh.hasSameReview(as: reviewed), "The maintenance plan changed after review. Review it again before continuing.")
+        try maintain(planID: fresh.id, credentials: credentials)
+    }
 }
 extension InstallerEngine {
     public func planMaintenance(installationID: String, operation: String) throws -> MaintenancePlan {
         try require(!configuration.demo, "Maintenance is unavailable in demo mode")
         try require(["repair", "upgrade", "uninstall"].contains(operation), "Unknown maintenance operation")
-        let scan = try scan()
+        let scan = try scan(readOnly: true)
         guard let os = scan.systems.first(where: { $0.vgid == installationID && $0.stub }) else { throw InstallerError("Installation not found") }
         if operation == "uninstall" { _ = try uninstallPartitions(os, scan: scan) }
         let changes = operation == "uninstall" ? ["Permanently delete \(os.label), including its Linux files and settings", "Restore macOS as the default startup volume", "Return adjacent free space to \(scan.current.label)"] : ["Refresh machine-owner authentication for \(os.label)", operation == "upgrade" ? "Replace m1n1 stage 1, preserving its boot variables" : "Keep the existing boot object and Linux files", "Select \(os.label) for startup and finish in paired recovery"]

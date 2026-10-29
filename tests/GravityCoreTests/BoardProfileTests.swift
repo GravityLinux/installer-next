@@ -58,18 +58,13 @@ private func fixtureBoard(state: FixtureFirmwareState = FixtureFirmwareState(), 
     #expect(try disjoint.resolve(HardwareIdentity(deviceClass: fixtureHardware.deviceClass, chipID: 0xf00d, boardID: 0x13)).id == "another-revision")
     #expect(Set(BoardRegistry.builtIn.profiles.map(\.id)) == ["j773g", "j700"])
 }
-@Test func catalogScopingAndStoragePolicyComeFromBoard() throws {
-    func template(_ fields: String) throws -> SoftwareTemplate {
-        try JSONDecoder().decode(SoftwareTemplate.self, from: Data("{\"name\":\"Test Linux\",\"default_os_name\":\"Gravity\",\"boot_object\":\"fixture.bin\",\"partitions\":[{\"name\":\"Linux\",\"type\":\"Linux\",\"size\":\"5GB\",\"expand\":true}]\(fields)}".utf8))
-    }
-    let board = fixtureBoard(), legacy = try template("")
-    #expect(legacy.supports(J773g.profile))
-    #expect(!legacy.supports(board))
-    #expect(try template(",\"supported_boards\":[\"fixture-board\"]").supports(board))
-    #expect(try !template(",\"supported_boards\":[\"j773g\"]").supports(board))
-    #expect(try template(",\"supported_devices\":[\"fixtureboardap\"],\"supported_fw\":[\"1.2.3\"]").supports(board))
-    #expect(try !template(",\"supported_devices\":[\"fixtureboardap\"],\"supported_fw\":[\"26.6.2\"]").supports(board))
-    #expect(try legacy.software(id: "fixture", storage: board.storage).minimumBytes == 36_000_000_000)
+@Test func compiledReleasesAndStoragePolicyComeFromBoard() throws {
+    let board = fixtureBoard()
+    let release = SoftwareTemplate(name: "Test Linux", mode: .linux, bootObject: "fixture.bin",
+        partitions: [PartitionTemplate(name: "Linux", type: "Linux", size: "5GB", expand: true)])
+    #expect(board.releases.isEmpty)
+    #expect(BoardRegistry.builtIn.profiles.allSatisfy { !$0.releases.isEmpty })
+    #expect(try release.software(id: "fixture", storage: board.storage).minimumBytes == 36_000_000_000)
     #expect(try board.boot.resource(board.boot.stage1, in: URL(fileURLWithPath: "/resources")).path == "/resources/boot/fixture/assets/fixture.bin")
     #expect(try BootObject.build(Data("boot".utf8), variables: [], alignment: board.boot.registration.alignment).count == 16384)
 }

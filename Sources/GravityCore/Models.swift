@@ -58,7 +58,7 @@ public enum InstallStep: String, Codable, CaseIterable, Sendable {
     public var help: String {
         switch self {
         case .inspecting: return "Checking the model, macOS version, boot environment, and partition layout."
-        case .metadata: return "The release catalog determines which desktops and images are available for this Mac."
+        case .metadata: return "Loading the release definitions compiled into this installer for your board."
         case .package: return "Only the needed parts of the software archive are downloaded."
         case .ipsw: return "Apple restore firmware provides the boot files and recovery environment this Mac needs."
         case .validateRecovery: return "Recovery and the firmware required by this board are checked before any partition changes."
@@ -82,7 +82,7 @@ public enum InstallStep: String, Codable, CaseIterable, Sendable {
         case .firmwareArchive: return "Saving the original firmware and calibration so future updates can rebuild the same package."
         case .systemImage: return "Writing the selected image to its Linux partition and checking its archive CRC."
         case .systemFiles: return "Copying boot and system files. Keep your Mac plugged in and awake."
-        case .extras: return "Fetching the additional files listed in the release catalog. Stay connected to the internet."
+        case .extras: return "Fetching the additional files defined for this release. Stay connected to the internet."
         case .bootObject: return "Preserving the EFI partition identifiers and applying this board’s boot object alignment."
         case .installerData: return "Saving restore metadata and partition identities for repairs and firmware updates."
         case .reducedSecurity, .defaultBoot: return "Apple requires a macOS machine-owner login to select the new startup environment."
@@ -115,7 +115,7 @@ public typealias EventSink = @Sendable (InstallEvent) -> Void
 public enum InstallationMode: String, Codable, Sendable {
     case linux, uefi, bootloader
 }
-public struct Software: Codable, Identifiable, Sendable {
+public struct Software: Codable, Identifiable, Equatable, Sendable {
     public let id: String
     public let name: String
     public let minimumBytes: Int64
@@ -123,7 +123,7 @@ public struct Software: Codable, Identifiable, Sendable {
     public let developer: Bool
     public var mode: InstallationMode = .linux
 }
-public struct StorageTarget: Codable, Identifiable, Sendable {
+public struct StorageTarget: Codable, Identifiable, Equatable, Sendable {
     public let id: String
     public let name: String
     public let kind: String
@@ -149,7 +149,7 @@ public struct Inspection: Codable, Sendable {
     public var boardProfileID: String? = nil
     public var macOSReserveBytes: Int64 = 40_000_000_000
 }
-public struct InstallSelection: Codable, Sendable {
+public struct InstallSelection: Codable, Equatable, Sendable {
     public var targetID: String
     public var softwareID: String
     public var bytes: Int64
@@ -165,6 +165,13 @@ public struct InstallPlan: Codable, Identifiable, Sendable {
     public let software: Software
     public let macOSAfterBytes: Int64?
     public let changes: [String]
+    public var fingerprint: String? = nil
+
+    public func hasSameReview(as other: InstallPlan) -> Bool {
+        selection == other.selection && target.id == other.target.id && target.kind == other.target.kind
+            && target.name == other.target.name && target.totalBytes == other.target.totalBytes && software == other.software
+            && macOSAfterBytes == other.macOSAfterBytes && changes == other.changes && fingerprint == other.fingerprint
+    }
 }
 public struct Credentials: Sendable {
     public let username: String
@@ -173,14 +180,12 @@ public struct Credentials: Sendable {
 }
 public struct EngineConfiguration: Sendable {
     public var resourceDirectory: URL
-    public var catalogURL: URL?
-    public var repositoryURL: URL?
     public var appBundle: URL?
     public var stage2URL: URL?
     public var developer = false
     public var demo = false
-    public init(resourceDirectory: URL, catalogURL: URL? = nil, repositoryURL: URL? = nil, appBundle: URL? = nil, stage2URL: URL? = nil, demo: Bool = false) {
-        self.resourceDirectory = resourceDirectory; self.catalogURL = catalogURL; self.repositoryURL = repositoryURL; self.appBundle = appBundle; self.stage2URL = stage2URL; self.demo = demo
+    public init(resourceDirectory: URL, appBundle: URL? = nil, stage2URL: URL? = nil, demo: Bool = false) {
+        self.resourceDirectory = resourceDirectory; self.appBundle = appBundle; self.stage2URL = stage2URL; self.demo = demo
     }
 }
 public enum GuideLinks {
@@ -188,36 +193,32 @@ public enum GuideLinks {
     public static let recovery = URL(string: "https://gravitylinux.org/finish")!
     public static let safety = URL(string: "https://gravitylinux.org/docs/installer-safety")!
 }
-struct PartitionTemplate: Decodable, Sendable {
+public struct PartitionTemplate: Decodable, Sendable {
     let name: String, type: String, size: String
     let format: String?, image: String?, source: String?
     let expand: Bool?, copy_firmware: Bool?, copy_installer_data: Bool?, volume_id: String?
+    public init(name: String, type: String, size: String, format: String? = nil, image: String? = nil, source: String? = nil,
+                expand: Bool = false, copyFirmware: Bool = false, copyInstallerData: Bool = false, volumeID: String? = nil) {
+        self.name = name; self.type = type; self.size = size; self.format = format; self.image = image; self.source = source
+        self.expand = expand; copy_firmware = copyFirmware; copy_installer_data = copyInstallerData; volume_id = volumeID
+    }
     var bytes: Int64 { get throws { alignUp(try parseSize(size)) } }
 }
-struct SoftwareTemplate: Decodable, Sendable {
+public struct SoftwareTemplate: Sendable {
     let name: String, default_os_name: String, boot_object: String
     let package: String?, icon: String?, next_object: String?
-    let expert: Bool?, external_boot: Bool?, supported_fw: [String]?, extras: [String]?
+    let expert: Bool
+    let extras: [String]?
     let partitions: [PartitionTemplate]
-    let install_mode: InstallationMode?
-    let supported_boards: [String]?
-    let supported_devices: [String]?
-    func supports(_ board: BoardProfile) -> Bool {
-        if let ids = supported_boards, !ids.contains(board.id) { return false }
-        if let devices = supported_devices, !devices.contains(board.deviceClass) { return false }
-        if supported_boards == nil && supported_devices == nil && !board.allowsLegacyCatalog { return false }
-        if let versions = supported_fw, !versions.contains(board.restore.version) { return false }
-        return board.installationModes.contains(mode)
+    let mode: InstallationMode
+    public init(name: String, mode: InstallationMode, bootObject: String = "m1n1.bin", package: URL? = nil,
+                partitions: [PartitionTemplate] = [], defaultOSName: String = "Gravity Linux", icon: String? = nil,
+                nextObject: String? = nil, developer: Bool = false, extras: [URL] = []) {
+        self.name = name; self.mode = mode; boot_object = bootObject; self.package = package?.absoluteString
+        self.partitions = partitions; default_os_name = defaultOSName; self.icon = icon; next_object = nextObject
+        expert = developer; self.extras = extras.map(\.absoluteString)
     }
-    var mode: InstallationMode {
-        if let install_mode { return install_mode }
-        // Compatibility with existing release catalogs. New catalogs should
-        // specify install_mode explicitly; the layout policy is always enforced.
-        let title = name.lowercased()
-        if title.contains("uefi") { return .uefi }
-        if title.contains("tethered") || title.contains("bootloader only") { return .bootloader }
-        return .linux
-    }
+    public static let bootloaderOnly = SoftwareTemplate(name: "Bootloader only", mode: .bootloader)
     var layout: [PartitionTemplate] {
         switch mode {
         case .linux: return partitions
@@ -233,4 +234,3 @@ struct SoftwareTemplate: Decodable, Sendable {
         return Software(id: id, name: name, minimumBytes: mode == .linux ? recommended : storage.stubBytes + minimum, recommendedBytes: recommended, developer: expert == true, mode: mode)
     }
 }
-struct Catalog: Decodable { let os_list: [SoftwareTemplate] }

@@ -84,9 +84,6 @@ private let hairline = Color(red: 0.824, green: 0.824, blue: 0.843)
     }
     @ViewBuilder private var content: some View {
         switch model.screen {
-        case .authorize:
-            heading("Install Gravity Linux on your Mac", "Authorize the installer to check your Mac and prepare a separate Linux installation.")
-            info("Apple will ask you to authorize this app with a macOS administrator login.", icon: "lock.shield")
         case .checking:
             VStack(spacing: 18) { ProgressView(); Text("Gathering Info").font(.system(size: 17, weight: .medium)); Text(model.progress.title).foregroundStyle(muted) }.frame(maxWidth: .infinity).padding(.top, 150)
         case .unsupported:
@@ -193,8 +190,8 @@ private let hairline = Color(red: 0.824, green: 0.824, blue: 0.843)
             existingAction("Upgrade firmware", "Update m1n1 stage 1, preserving the installed boot variables.", icon: "cpu", operation: "upgrade")
             existingAction("Uninstall", "Remove Gravity Linux and give its space back to macOS.", icon: "trash", operation: "uninstall").disabled(model.inspection?.existing.first(where: { $0.id == model.selectedExisting })?.canUninstall != true)
         case .failure:
-            heading("Installation needs attention", model.error ?? "An unexpected error occurred.")
-            info("If installation had already started, inspect the disk before attempting a fresh install. A completed first stage can be resumed using Repair.", icon: "exclamationmark.triangle")
+            heading(model.failureTitle, model.error ?? "An unexpected error occurred.")
+            if model.changesMayHaveStarted { info("Disk changes may have started. Keep the error details; a completed first stage can be resumed using Repair.", icon: "exclamationmark.triangle") }
             if !model.details.isEmpty { Text(model.details.joined(separator: "\n")).font(.system(size: 11, design: .monospaced)).textSelection(.enabled) }
         case .removed:
             heading("Gravity Linux was removed", "macOS is the default startup volume again. The adjacent free space has been returned to macOS.")
@@ -226,7 +223,6 @@ private let hairline = Color(red: 0.824, green: 0.824, blue: 0.843)
             if model.busy && model.screen != .installing { ProgressView().controlSize(.small) }
             Spacer()
             switch model.screen {
-            case .authorize: pill("Quit") { NSApp.terminate(nil) }; pill("Authorize", primary: true) { Task { await model.authorize() } }
             case .welcome: pill("Quit") { NSApp.terminate(nil) }; pill("Continue", primary: true) { model.screen = .storage }
             case .storage: pill("Go Back") { model.screen = .welcome }; pill("Continue", primary: true) { model.clampSize(); model.screen = .software }.disabled(model.target == nil || model.maximumGB < model.minimumGB)
             case .software: pill("Go Back") { model.screen = .storage }; pill("Continue", primary: true) { Task { await model.review() } }.disabled(model.software == nil || model.busy)
@@ -262,7 +258,7 @@ private let hairline = Color(red: 0.824, green: 0.824, blue: 0.843)
         VStack(alignment: .leading, spacing: 20) {
             Label("Enter your macOS administrator login", systemImage: "lock.shield").font(.system(size: 18, weight: .semibold))
             Text(model.stage2 == nil ? "This authorizes the changes you reviewed." : "This allows Gravity Linux to be added to your startup options.").foregroundStyle(muted)
-            TextField("Username", text: $model.username).textFieldStyle(.roundedBorder)
+            TextField("Username", text: $model.username).textFieldStyle(.roundedBorder).disabled(geteuid() != 0 && !model.launch.configuration.demo)
             SecureField("Password", text: $model.password).textFieldStyle(.roundedBorder).onSubmit { if !model.password.isEmpty && !model.username.isEmpty { Task { await model.install() } } }
             HStack { Spacer(); pill("Cancel") { model.credentialsSheet = false; model.password = "" }; pill(model.stage2 == nil ? "Continue" : "Finalize", primary: true) { Task { await model.install() } }.disabled(model.username.isEmpty || model.password.isEmpty) }
         }.padding(32).frame(width: 430).preferredColorScheme(.light)
@@ -272,9 +268,7 @@ private let hairline = Color(red: 0.824, green: 0.824, blue: 0.843)
             Toggle("Enable developer options", isOn: $model.developer)
             Text("Enable experimental board profiles and software for testing Gravity Linux.").foregroundStyle(muted)
             if model.developer {
-                TextField("OS catalog URL", text: $model.customCatalog).textFieldStyle(.roundedBorder)
-                TextField("OS image repository URL", text: $model.customRepository).textFieldStyle(.roundedBorder)
-                Text("Developer software is listed when the release catalog provides it. Hardware checks and recovery verification always apply.").font(.caption).foregroundStyle(muted)
+                Text("Experimental releases are compiled into this installer. Hardware checks and recovery verification always apply.").font(.caption).foregroundStyle(muted)
             }
             HStack { Spacer(); pill("Done", primary: true) { Task { await model.applyDeveloperOptions() } } }
         }.padding(28).frame(width: 470).preferredColorScheme(.light)

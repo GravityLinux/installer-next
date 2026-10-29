@@ -1,0 +1,46 @@
+id,group,current_surface,trigger,disk_state,user_actions,design_notes
+startup.unsupported,Startup,Unsupported-board screen,No exact board/chip match,unchanged,Quit; check again,Dedicated design; show product number
+startup.developer-board,Startup,Unsupported-board variant,Matching profile is developer-only,unchanged,Developer Options; quit,Dedicated developer-gate design
+startup.os-too-old,Startup,Startup failure placeholder,Host macOS below board minimum,unchanged,Quit; update macOS; retry,Explain minimum and current versions
+startup.hardware-unreadable,Startup,Startup failure placeholder,IORegistry or boot environment cannot be read,unchanged,Retry; copy details; quit,Distinguish probe failure from unsupported hardware
+startup.owner-unavailable,Startup,Startup failure placeholder,Primary macOS or machine-owner records cannot be identified,unchanged,Return to primary macOS; retry,No early credential screen
+startup.wrong-console-user,Startup,Startup failure placeholder,Console login is not a machine-owner administrator,unchanged,Switch macOS user; retry,Explain which account is required
+storage.unsupported-layout,Storage,Startup failure placeholder,Internal disk or GUID/APFS layout is not supported,unchanged,Quit; copy details,Show supported layout requirements
+storage.insufficient-space,Storage,Inline storage message,No target can fit the selected release plus macOS reserve,unchanged,Free space; choose another target; retry,Current inline design needs review
+storage.locked-or-unmounted,Storage,Not yet surfaced separately,Other APFS groups cannot be inspected read-only,unchanged,Unlock/mount in macOS; retry,Do not silently present a destructive option
+software.no-release,Software,Empty selection; Continue disabled,No compiled release is available for this board/mode,unchanged,Update installer; developer options; quit,No downloadable catalog/configuration error
+review.invalid-input,Review,Generic alert,"Invalid name, size, target or software selection",unchanged,Correct field; return to selection,Prefer field-specific feedback
+review.expired-or-changed,Review,Generic alert,Plan expired or layout/release differs from reviewed plan,unchanged,Reinspect; review again,Never auto-approve the changed plan
+credentials.empty,Credentials,Disabled Continue button,Username or password is empty,unchanged,Complete fields; cancel,One sheet per boot stage
+credentials.rejected,Credentials,Generic alert; returns to review,Password is incorrect or Apple rejects machine-owner authentication,unchanged unless later Apple tool rejects,Retry credentials; cancel,Distinguish typo from authorization policy failure
+credentials.privilege-denied,Credentials,Generic alert; returns to review,macOS refuses to start the privileged session,unchanged,Use logged-in administrator; retry; cancel,No separate Authorize screen
+credentials.cancelled,Credentials,Sheet dismissed,User cancels the password sheet,unchanged,Remain at Review or Finalize,No work starts and password field clears
+credentials.timeout,Credentials,Generic alert,Privileged-session handshake times out,unchanged,Retry; cancel,Keep review intact
+preflight.boot-assets-missing,Preflight,Generic alert; returns to review,Compiled boot object or branding resource is absent,unchanged,Reinstall/update installer; copy details,Installer packaging failure
+preflight.temporary-space,Preflight,Generic alert; returns to review,Insufficient temporary space for recovery validation,unchanged,Free temporary space; retry,Different from space reserved for Linux
+download.unavailable,Downloads,Generic alert before changes,"Offline, DNS, TLS, server, timeout or retry failure",unchanged,Retry; change network; cancel,Download progress and retry variant needed
+download.integrity,Downloads,Generic alert before changes,"Checksum, CRC or HTTP-range validation fails",unchanged,Retry verified download; copy details,Never offer bypass
+recovery-image.unqualified,Preflight,Generic alert before changes,"Restore identity, version, member, hash, AEA decode or DMG verify fails",unchanged,Update installer; retry; copy details,Board-specific recovery qualification failure
+firmware.source-missing,Firmware,Generic alert before changes,"Local factory, radio, camera, audio or restore input is missing",unchanged,Return to supported macOS; retry; copy details,Do not request firmware from a third-party server
+firmware.source-invalid,Firmware,Generic alert before changes,"Conflicting factory records, malformed calibration or unsupported firmware build",unchanged,Update installer; copy details,Do not offer another device calibration or verification bypass
+install.pre-mutation-failure,Installation,Returns to review with generic alert,Authorization or validation fails before resize/create events,unchanged,Review details; retry,No warning that partitions were already changed
+install.partial-failure,Installation,Installation stopped placeholder,"Resize, volume, write, format, bootability, default boot or security step fails",changes may have started,Keep logs; inspect current state; repair if stage 1 is ready,Needs dedicated partial-install design; no blanket fresh-install retry
+install.session-disconnected,Installation,Context-dependent failure placeholder,Privileged process or IPC connection ends unexpectedly,unknown; determine from last completed step,Keep logs; recheck installation; avoid duplicate install,Do not promise rollback or cancellation
+recovery.not-1tr,1TR,Finalize guidance variant,App opened in normal macOS or ordinary recovery,unchanged this session,Show 1TR guide; shut down; check again,Different from wrong pairing
+recovery.wrong-pairing,1TR,Finalize guidance variant,Recovery environment is not paired with chosen installation,unchanged this session,Choose correct startup volume; guide; check again,Name the required installation
+recovery.stage1-incomplete,1TR,Finalize disabled or failure placeholder,Saved first stage is not ready,partial installation from stage 1,Return to macOS; repair; copy details,Explain why finalization cannot proceed
+recovery.record-invalid,1TR,Startup failure placeholder,"Missing/corrupt record, volume IDs, hardware match or boot object",unknown prior state,Repair from macOS; copy details,Do not fall back to another board or volume
+recovery.already-complete,1TR,Complete screen,Saved finalization is already complete,already installed,Restart; quit,Already-complete variant should not request credentials
+recovery.policy-failed,1TR,Could not finish installation placeholder,bputil fails after authorization,security policy may have changed,Copy details; recheck status; retry finalization,Show completed versus remaining steps
+recovery.registration-failed,1TR,Could not finish installation placeholder,kmutil or final recovery cleanup fails,boot/security changes may have started,Copy details; recheck status; repair,Do not claim successful Linux installation
+maintenance.existing,Maintenance,Existing-installation screen,One existing managed installation is detected,unchanged,Repair; firmware upgrade; uninstall,Alternate entry flow needs design
+maintenance.multiple,Maintenance,Picker on existing-installation screen,Multiple existing installations are detected,unchanged,Select exact installation; then operation,Show identity and completion state clearly
+maintenance.repair-review,Maintenance,Shared Review screen,Repair requested,unchanged before confirmation,Review; authenticate once; cancel,Explain files retained and startup changes
+maintenance.upgrade-review,Maintenance,Shared Review screen,Stage-1 firmware upgrade requested,unchanged before confirmation,Review; authenticate once; cancel,Distinguish installer update from installed bootloader upgrade
+maintenance.uninstall-review,Maintenance,Shared Review screen,Uninstall requested,unchanged before confirmation,Review deletion; authenticate once; cancel,Destructive operation needs its own visual treatment
+maintenance.uninstall-unavailable,Maintenance,Disabled Uninstall or generic alert,Legacy/unmanaged/changed/non-adjacent partition manifest,unchanged,Copy details; use documented manual process,Explain why automatic removal is disabled
+maintenance.failed,Maintenance,Maintenance stopped placeholder,"Repair, upgrade or uninstall fails",changes may have started,Keep logs; recheck actual installation,Different variants for removal and repair
+maintenance.removed,Maintenance,Removed screen,Uninstall completes,Linux partitions removed,Quit,Alternate completion state needs design
+power.failed,Power,Generic alert,Shutdown or restart request fails or no privileged session remains,installation state unchanged,Retry when possible; use Apple menu,Never imply install failed solely because restart failed
+launcher.update-lock,App lifecycle,Terminal error only,App is updating or an active session blocks replacement,installer app unchanged,Wait; close idle instance; retry,Desktop presentation not designed
+updater.download-or-deploy-failed,App lifecycle,Bootstrap/terminal error only,"Archive, checksum, destination or atomic deployment fails",previous app retained when deployment fails,Retry; keep current app; show details,Separate from Linux disk-install failure
