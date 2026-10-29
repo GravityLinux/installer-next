@@ -44,6 +44,25 @@ private func distribution(_ app: URL, channel: String = "stable") -> InstallerDi
     let saved = try InstallerDistribution.read(from: destination)
     #expect(saved?.catalogURL == nil && saved?.repositoryURL == nil && saved == distribution)
 }
+@Test func executableSignatureSurvivesDeploymentAndRecoveryResourcesButRejectsTampering() throws {
+    let temp = try TemporaryDirectory(), source = try appFixture(temp.url.appending("download")), destination = temp.url.appending("Applications/Gravity Installer.app")
+    let commands = SystemCommands(), code = temp.url.appending("main.c"), signed = temp.url.appending("signed-installer")
+    try write(Data("int main(void) { return 0; }\n".utf8), to: code)
+    _ = try commands.run("/usr/bin/xcrun", ["clang", "-arch", "arm64", code.path, "-o", signed.path], input: nil)
+    _ = try commands.run("/usr/bin/codesign", ["--force", "--sign", "-", "--identifier", InstallerBuildInfo.bundleIdentifier, signed.path], input: nil)
+    let executable = source.appending("Contents/MacOS/gravity-installer")
+    try write(Data(contentsOf: signed), to: executable)
+    try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+    let result = try InstallerApplication.install(source: source, destination: destination, expectedRelease: "release-1", distribution: distribution(destination), commands: commands)
+    #expect(result.status == "installed")
+    try write(Data("{}\n".utf8), to: destination.appending("Contents/Resources/stage2.json"))
+    try write(Data("boot object".utf8), to: destination.appending("Contents/Resources/boot.bin"))
+    let installed = destination.appending("Contents/MacOS/gravity-installer")
+    _ = try commands.run("/usr/bin/codesign", ["--verify", "--strict", "--ignore-resources", installed.path], input: nil)
+    var tampered = try Data(contentsOf: installed); tampered[4096] ^= 1
+    try write(tampered, to: installed)
+    #expect(throws: (any Error).self) { try commands.run("/usr/bin/codesign", ["--verify", "--strict", "--ignore-resources", installed.path], input: nil) }
+}
 @Test func updatesReplaceTheWholeAppAndSkipCurrentVersions() throws {
     let temp = try TemporaryDirectory(), destination = temp.url.appending("Applications/Gravity Installer.app")
     let first = try appFixture(temp.url.appending("v1")), second = try appFixture(temp.url.appending("v2"), version: "0.2.0", release: "release-2")

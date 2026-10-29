@@ -38,8 +38,14 @@ else
     cp "$logo" "$output/Contents/Resources/Gravity.icns"
     cp "$root/artwork/LICENSE" "$root/artwork/README.md" "$root/artwork/TRADEMARKS.md" "$output/Contents/Resources/licenses/gravity-artwork/"
 fi
-# Only seal the executable: per-install boot.bin and stage2.json are added to
-# Resources on the target volume. They must not invalidate a bundle resource seal.
-/usr/bin/codesign --force --sign - "$output/Contents/MacOS/gravity-installer"
-/usr/bin/codesign --verify --strict "$output/Contents/MacOS/gravity-installer"
+# Sign outside the bundle. codesign recognizes an app's main executable even
+# when passed its file path and otherwise creates a seal over all resources.
+# installation.json, boot.bin and stage2.json are intentionally added later.
+signature_work=$(mktemp -d)
+trap 'rm -rf "$signature_work"' EXIT HUP INT TERM
+cp "$output/Contents/MacOS/gravity-installer" "$signature_work/gravity-installer"
+/usr/bin/codesign --force --sign - --identifier org.gravitylinux.installer "$signature_work/gravity-installer"
+cp "$signature_work/gravity-installer" "$output/Contents/MacOS/gravity-installer"
+rm -rf "$output/Contents/_CodeSignature"
+/usr/bin/codesign --verify --strict --ignore-resources "$output/Contents/MacOS/gravity-installer"
 echo "Built $output"

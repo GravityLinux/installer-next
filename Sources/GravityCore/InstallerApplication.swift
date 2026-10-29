@@ -96,7 +96,7 @@ public enum InstallerApplication {
         let build = try InstallerBuildInfo.read(source)
         try require(build.release == expectedRelease, "Downloaded installer release does not match latest")
         try validateContents(source)
-        _ = try commands.run("/usr/bin/codesign", ["--verify", "--strict", executable(in: source).path], input: nil)
+        _ = try commands.run("/usr/bin/codesign", ["--verify", "--strict", "--ignore-resources", executable(in: source).path], input: nil)
         let parent = destination.deletingLastPathComponent(); try mkdir(parent)
         try validateDestination(destination)
         if let result = try unchanged(destination, build: build, distribution: distribution, force: force, commands: commands) { return result }
@@ -109,7 +109,7 @@ public enum InstallerApplication {
         try fm.copyItem(at: source, to: stage)
         try write(JSONEncoder().encode(distribution), to: InstallerDistribution.location(in: stage))
         try securePermissions(stage)
-        _ = try commands.run("/usr/bin/codesign", ["--verify", "--strict", executable(in: stage).path], input: nil)
+        _ = try commands.run("/usr/bin/codesign", ["--verify", "--strict", "--ignore-resources", executable(in: stage).path], input: nil)
         let replacing = fm.fileExists(atPath: destination.path)
         if replacing {
             let result = stage.path.withCString { from in destination.path.withCString { gravity_swap_paths(from, $0) } }
@@ -124,7 +124,7 @@ public enum InstallerApplication {
             return InstallerDeploymentResult(status: "newerInstalled", path: app.path, build: current)
         }
         if current == build, try InstallerDistribution.read(from: app) == distribution,
-           (try? commands.run("/usr/bin/codesign", ["--verify", "--strict", executable(in: app).path], input: nil)) != nil {
+           (try? commands.run("/usr/bin/codesign", ["--verify", "--strict", "--ignore-resources", executable(in: app).path], input: nil)) != nil {
             return InstallerDeploymentResult(status: "current", path: app.path, build: current)
         }
         return nil
