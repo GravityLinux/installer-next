@@ -6,11 +6,19 @@ set -eu
 binary=$1
 artwork=$2
 test -f "$binary"
+if command -v magick >/dev/null 2>&1; then
+    image_converter=magick
+elif command -v convert >/dev/null 2>&1; then
+    image_converter=convert
+else
+    echo 'ImageMagick is required to build the boot logo (magick or convert).' >&2
+    exit 1
+fi
 logo_tmp=$(mktemp -d)
 trap 'rm -rf "$logo_tmp"' EXIT HUP INT TERM
 
 for size in 256 128; do
-    magick "$artwork/logos/png_$size/GravityLinux_logomark.png" \
+    "$image_converter" "$artwork/logos/png_$size/GravityLinux_logomark.png" \
         -background black -flatten -depth 8 -resize "${size}x${size}!" \
         "rgba:$logo_tmp/gravity_$size.rgba"
 done

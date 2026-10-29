@@ -11,13 +11,12 @@ if true; then
     export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
     export PATH="/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
-    export INSTALLER_BASE=${INSTALLER_BASE:-http://localhost:5000/releases}
+    export INSTALLER_BASE=${INSTALLER_BASE:-}
     export VERSION_FLAG=${VERSION_FLAG:-$INSTALLER_BASE/latest}
-    export INSTALLER_DATA=${INSTALLER_DATA:-http://localhost:5000/data/installer_data.json}
-    export REPO_BASE=${REPO_BASE:-http://localhost:5000}
-    set -- --developer "$@"
+    export INSTALLER_DATA=${INSTALLER_DATA:-$INSTALLER_BASE/installer_data.json}
+    export REPO_BASE=${REPO_BASE:-$INSTALLER_BASE}
 
-    installer_channel=local
+    installer_channel=${INSTALLER_CHANNEL:-stable}
     installer_applications=${GRAVITY_APPLICATIONS_DIR:-/Applications}
     installer_app="$installer_applications/Gravity Installer.app"
     installer_update_only=0
@@ -39,6 +38,8 @@ if true; then
         echo 'Gravity Installer is not installed.' >&2
         exit 1
     fi
+    : "${INSTALLER_BASE:?Set INSTALLER_BASE to the server directory containing the installer release artifacts.}"
+    case "$installer_channel" in stable|development|local) ;; *) echo "Invalid installer channel." >&2; exit 1 ;; esac
     installer_version=$(curl -fsSL --retry 3 --connect-timeout 30 "$VERSION_FLAG")
     case "$installer_version" in
         ''|*[!A-Za-z0-9._-]*) echo 'Invalid installer release version.' >&2; exit 1 ;;

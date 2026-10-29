@@ -25,8 +25,8 @@ enum Screen: Int { case checking = -2, authorize = -1, welcome, storage, softwar
     @Published var username = ""
     @Published var password = ""
     @Published var developer = false
-    @Published var customCDN = ""
-    @Published var nightly = false
+    @Published var customCatalog = ""
+    @Published var customRepository = ""
     @Published var stage2: Stage2Status?
     @Published var selectedExisting = ""
     let launch: LaunchOptions
@@ -35,17 +35,25 @@ enum Screen: Int { case checking = -2, authorize = -1, welcome, storage, softwar
     var lastOperationTitle: String?
     init() {
         launch = try! LaunchOptions(); developer = launch.configuration.developer
+        customCatalog = launch.configuration.catalogURL?.absoluteString ?? ""
+        customRepository = launch.configuration.repositoryURL?.absoluteString ?? ""
         createEngine()
     }
     func createEngine() {
         var configuration = launch.configuration; configuration.developer = developer
-        if developer, let url = URL(string: customCDN), url.scheme == "https", url.host != nil {
-            configuration.repositoryURL = url
-            configuration.catalogURL = url.appendingPathComponent(nightly ? "installer-dev/installer_data.json" : "installer/installer_data.json")
-        } else if developer && nightly {
-            configuration.catalogURL = URL(string: "https://cdn.gravitylinux.org/installer-dev/installer_data.json")!
+        if developer {
+            configuration.catalogURL = customCatalog.isEmpty ? nil : URL(string: customCatalog)
+            configuration.repositoryURL = customRepository.isEmpty ? nil : URL(string: customRepository)
         }
         engine = InstallerEngine(configuration: configuration) { [weak self] event in Task { @MainActor in self?.receive(event) } }
+    }
+    func applyDeveloperOptions() async {
+        for text in [customCatalog, customRepository] where developer && !text.isEmpty {
+            guard let url = URL(string: text), url.isFileURL || url.scheme == "https" || (url.scheme == "http" && ["localhost", "127.0.0.1", "::1"].contains(url.host ?? "")) else {
+                error = "Use an HTTPS URL, a local file URL, or HTTP on localhost for testing."; return
+            }
+        }
+        developerSheet = false; createEngine(); await load()
     }
     func receive(_ event: InstallEvent) {
         progress = event
@@ -125,6 +133,8 @@ enum Screen: Int { case checking = -2, authorize = -1, welcome, storage, softwar
             func quote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
             var arguments = Array(CommandLine.arguments.dropFirst()).filter { !["--gui", "--developer", "--no-developer"].contains($0) }
             arguments.append(developer ? "--developer" : "--no-developer")
+            if developer && !customCatalog.isEmpty { arguments += ["--catalog", customCatalog] }
+            if developer && !customRepository.isEmpty { arguments += ["--repository", customRepository] }
             arguments.insert("--gui", at: 0)
             let command = ([CommandLine.arguments[0]] + arguments).map(quote).joined(separator: " ") + " >/dev/null 2>&1 &"
             let script = "do shell script \"" + command.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\" with administrator privileges"

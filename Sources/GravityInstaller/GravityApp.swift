@@ -272,11 +272,11 @@ private let hairline = Color(red: 0.824, green: 0.824, blue: 0.843)
             Toggle("Enable developer options", isOn: $model.developer)
             Text("Enable experimental board profiles and software for testing Gravity Linux.").foregroundStyle(muted)
             if model.developer {
-                TextField("Custom CDN URL (https://…)", text: $model.customCDN).textFieldStyle(.roundedBorder)
-                Toggle("Use nightly release catalog", isOn: $model.nightly)
+                TextField("OS catalog URL", text: $model.customCatalog).textFieldStyle(.roundedBorder)
+                TextField("OS image repository URL", text: $model.customRepository).textFieldStyle(.roundedBorder)
                 Text("Developer software is listed when the release catalog provides it. Hardware checks and recovery verification always apply.").font(.caption).foregroundStyle(muted)
             }
-            HStack { Spacer(); pill("Done", primary: true) { model.developerSheet = false; model.createEngine(); Task { await model.load() } } }
+            HStack { Spacer(); pill("Done", primary: true) { Task { await model.applyDeveloperOptions() } } }
         }.padding(28).frame(width: 470).preferredColorScheme(.light)
     }
 }

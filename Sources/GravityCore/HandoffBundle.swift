@@ -4,7 +4,7 @@ import Foundation
 /// Exercise the same board firmware pipeline without creating an installation,
 /// changing partitions, writing NVRAM, or configuring a boot policy.
 enum HandoffBundle {
-    static func collect(destination: URL, ipsw: URL?, calibration: URL?, resources: URL,
+    static func collect(destination: URL, ipsw: URL?, resources: URL,
                         boards: BoardRegistry, developer: Bool = false, commands: CommandRunning, events: @escaping EventSink) throws {
         try require(!fm.fileExists(atPath: destination.path), "Handoff destination already exists")
         events(InstallEvent(.inspecting))
@@ -18,18 +18,10 @@ enum HandoffBundle {
         let archive = try ZIPArchive(source), manifestURL = temp.url.appending("BuildManifest.plist")
         try archive.extract("BuildManifest.plist", to: manifestURL)
         let identity = try board.restore.selectIdentity(in: plist(manifestURL), hardware: system.hardware)
-        let validationResources: URL
-        if let calibration {
-            try require(fm.fileExists(atPath: calibration.path), "Calibration cache directory does not exist")
-            validationResources = temp.url.appending("resources")
-            let link = validationResources.appending("board-calibration/\(board.id)")
-            try mkdir(link.deletingLastPathComponent())
-            try fm.createSymbolicLink(at: link, withDestinationURL: calibration.standardizedFileURL)
-        } else { validationResources = resources }
         let image = try RecoveryImage(archive: archive, member: board.restore.member, profile: board.restore,
             commands: commands, validateFirmware: {
                 try board.firmware.validateRecovery(FirmwareValidationContext(recovery: $0, hardware: system.hardware,
-                    resources: validationResources, deviceTree: system.tree, commands: commands), events: events)
+                    resources: resources, deviceTree: system.tree, commands: commands), events: events)
             }, events: events)
         var copied = Set<String>(), kernel: URL?
         for (name, entry) in dict(identity["Manifest"]).sorted(by: { $0.key < $1.key }) {
@@ -46,7 +38,7 @@ enum HandoffBundle {
         }
         let mount = try MountedRecovery(image: image.url, commands: commands)
         let context = FirmwareCollectionContext(recovery: mount.url, fud: fud, kernel: kernel, raw: raw,
-            deviceTree: system.tree, hardware: system.hardware, resources: validationResources,
+            deviceTree: system.tree, hardware: system.hardware, resources: resources,
             restore: fud, restoreIdentity: identity, commands: commands)
         try FirmwarePipeline.collect(board: board, hardware: system.hardware, context: context, destination: output,
             archive: output.appending("all_firmware.tar.gz"), commands: commands, events: events)

@@ -19,7 +19,7 @@ private final class DistributionFixture {
         server = root.appending("release server"); package = root.appending("package"); capture = root.appending("capture"); downloads = root.appending("downloads")
         applications = root.appending("Applications")
         repository = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        bootstrap = repository.appending("scripts/bootstrap-prod.sh")
+        bootstrap = repository.appending("scripts/bootstrap.sh")
         for dir in [server, package, capture, downloads, applications] { try mkdir(dir) }
         try copy(repository.appending("install.sh"), package.appending("install.sh"))
         try copy(repository.appending("install.sh"), package.appending("Gravity Installer.app/Contents/Resources/launch.sh"))
@@ -117,4 +117,12 @@ private final class DistributionFixture {
     #expect(String(decoding: output, as: UTF8.self).contains("Latest installer release: fixture-v1"))
     #expect(try fm.contentsOfDirectory(atPath: fixture.applications.path).isEmpty)
     #expect(try fm.contentsOfDirectory(atPath: fixture.downloads.path).isEmpty)
+}
+@Test func bootstrapNeedsAnExplicitArtifactSource() throws {
+    let fixture = try DistributionFixture()
+    do {
+        _ = try SystemCommands().run("/usr/bin/env", ["-u", "INSTALLER_BASE", "GRAVITY_APPLICATIONS_DIR=\(fixture.applications.path)", "/bin/sh", "-s", "--", "--demo"], input: Data(contentsOf: fixture.bootstrap))
+        Issue.record("Bootstrap used an implicit download source")
+    } catch { #expect(error.localizedDescription.contains("Set INSTALLER_BASE")) }
+    #expect(try fm.contentsOfDirectory(atPath: fixture.applications.path).isEmpty)
 }

@@ -31,6 +31,6 @@ printf '%s\n' "$version" > "$staging/version.tag"
 mkdir -p releases
 tar --no-mac-metadata --no-fflags --no-acls --no-xattrs -czf "releases/installer-$version.tar.gz" -C "$staging" .
 (cd releases && /usr/bin/shasum -a 256 "installer-$version.tar.gz" > "installer-$version.tar.gz.sha256")
-cp scripts/bootstrap-prod.sh scripts/bootstrap-dev.sh releases/
+cp scripts/bootstrap.sh releases/bootstrap.sh
 printf '%s\n' "$version" > releases/latest
 echo "Built releases/installer-$version.tar.gz"

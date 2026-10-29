@@ -1,0 +1,24 @@
+name: Native installer checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Test Swift installer
+        run: ./test.sh
+      - name: Check app packaging
+        run: |
+          PREVIEW=1 sh scripts/build-app.sh
+          'dist/Gravity Installer.app/Contents/MacOS/gravity-installer' --version

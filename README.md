@@ -4,6 +4,84 @@ WIP: Experimental Gravity Linux installer
 
 This will become the default installer of the Gravity Linux project.
 
+## Build and local testing
+
+Build on macOS with Swift 6:
+
+```sh
+./test.sh
+swift run gravity-installer --demo
+PREVIEW=1 sh scripts/build-app.sh
+```
+
+Preview apps always run in demo mode. Real app archives require the Gravity
+artwork submodule and a qualified stage-1 bootloader for the target board:
+
+```sh
+git submodule update --init artwork
+M1N1_STAGE1=/absolute/path/to/qualified/m1n1.bin ./build.sh
+```
+
+`BOOT_ASSETS_DIR` can supply a complete boot-assets directory instead. The
+archive, checksum, version marker and generic bootstrap are written to
+`releases/`. `VERSION` tracks the app version; archive IDs also identify the Git
+revision. No remote publishing or deployment runs as part of this build.
+
+For a full local test, serve these files from one directory:
+
+```
+releases/
+  bootstrap.sh
+  latest
+  installer-<release>.tar.gz
+  installer-<release>.tar.gz.sha256
+  installer_data.json
+  os/
+    <packages referenced by the catalog>
+```
+
+The catalog must declare `supported_boards: ["j700"]` for a j700 image and use
+boot objects included in the app. Relative package names are resolved under
+`os/`; absolute package URLs are also supported. The host must support HEAD and
+HTTP byte ranges for OS archives. One local server option on macOS is:
+
+```sh
+ruby -run -e httpd -- --bind-address=127.0.0.1 --port=5050 ./releases
+```
+
+On the Neo, either run that server locally or forward the server's port from
+the build Mac in a separate Terminal window:
+
+```sh
+ssh -N -L 5050:127.0.0.1:5050 USER@BUILD_MAC
+```
+
+Then install/update the persistent app and launch the GUI:
+
+```sh
+curl -fsSL http://127.0.0.1:5050/bootstrap.sh | \
+  INSTALLER_BASE=http://127.0.0.1:5050 INSTALLER_CHANNEL=development sh
+```
+
+For the TUI, replace the final `sh` with `sh -s -- --tui`. `--demo` previews the
+interface, `--update` updates without launching, and `--version` prints the
+installed version. The bootstrap saves its download configuration in the app;
+later launches do not need the server's temporary files. The development channel
+enables developer-only boards such as j700.
+
+`INSTALLER_BASE` is required for downloads. By default the catalog is
+`$INSTALLER_BASE/installer_data.json` and the image repository is
+`$INSTALLER_BASE`. Override them with `INSTALLER_DATA` and `REPO_BASE` on the `sh`
+process. Direct launches accept `--catalog URL_OR_PATH --repository URL`.
+There are no built-in catalog/image hosting defaults. Local HTTP is allowed on
+loopback; use an SSH tunnel or HTTPS when the server is on another computer.
+
+Only Gravity installer/OS artifacts belong on this server. Apple restore images
+are downloaded directly from Apple. Per-device firmware and calibration are
+collected on the target Mac, and the generated firmware bundle stays local.
+
+The only GitHub automation is a macOS test and preview-packaging check.
+
 ## Board support and firmware qualification
 
 Boards use their product numbers throughout the app, API and source files:
@@ -38,27 +116,28 @@ still need to match the board, and hardware support needs device qualification.
 Developer selection is saved for recovery finalization, so the second stage
 retains the choice made when installing.
 
-The Neo collector packages MT7932 firmware, the MT793B B1 upload payload and
+The j700 collector packages MT7932 firmware, the MT793B B1 upload payload and
 IMX558 camera setfile. It archives factory BWC2 data, AID44 audio tuning and
 selected restore firmware for later rebuilds. Resident AOP/PMP/ISP/DCP/GPU
 firmware is supplied by the selected restore and iBoot, not uploaded by the
 installer firmware package.
 
-The current Linux Wi-Fi ABI also requires two per-radio calibration caches.
-Provide a directory containing `mediatek/mt7932/calibration-<MAC>.bin` and
-`mediatek/mt7932/precal-<MAC>.bin`. These must be the target radio’s captures:
-the collector checks the factory MAC, file formats and RF payloads against
-that machine’s fresh BWC2 record. It does not regenerate these caches solely
-from factory data yet and never substitutes another machine’s calibration.
-Normal installation expects them under `Contents/Resources/board-calibration/j700`.
+The j700 loader reads its BWC2 factory record from
+`/System/Volumes/Hardware/FactoryData/System/Library/Caches/com.apple.factorydata`
+and its Wi-Fi MAC from the live device tree. It validates the OCA2 section table,
+checks section checksums/bounds, and generates the Linux startup calibration and
+operating precal caches locally. No captured files or calibration in the app
+bundle are required. The current operating bank deliberately follows the Linux
+driver's qualified 6 GHz group 28 policy; it does not claim general channel
+coverage. The original factory record is saved in the private firmware archive
+so rebuilds do not depend on macOS still being available.
 
 The packaged executable can qualify collection without installing:
 
 ```sh
 "Gravity Installer.app/Contents/MacOS/gravity-installer" \
   --developer \
-  --handoff-bundle "$HOME/neo-handoff" \
-  --calibration-cache "$HOME/neo-calibration"
+  --handoff-bundle "$HOME/neo-handoff"
 ```
 
 An optional `--ipsw URL_OR_PATH` selects a locally cached copy of the qualified

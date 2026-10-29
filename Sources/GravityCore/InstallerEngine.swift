@@ -49,7 +49,7 @@ public actor InstallerEngine {
     }
     private func loadCatalog(for board: BoardProfile) throws {
         events(InstallEvent(.metadata))
-        let url = configuration.catalogURL
+        guard let url = configuration.catalogURL else { throw InstallerError("No OS catalog configured. Set --catalog to your installer_data.json URL or file.") }
         let data: Data
         if url.isFileURL { data = try Data(contentsOf: url) }
         else {
@@ -90,12 +90,14 @@ public actor InstallerEngine {
     }
     public func inspect() throws -> Inspection {
         if configuration.demo { return try demoInspection() }
-        let scan = try scan(); try loadCatalog(for: scan.board)
-        let software = try templates.sorted { $0.key < $1.key }.map { try $0.value.software(id: $0.key, storage: scan.board.storage) }
+        let scan = try scan()
         let existing = scan.systems.filter { $0.stub && fm.fileExists(atPath: $0.resources.appending("boot.bin").path) }.map { os in
             let record = try? JSONDecoder().decode(Stage2Record.self, from: Data(contentsOf: os.resources.appending("stage2.json")))
             return ExistingInstallation(id: os.vgid, name: os.label, needsFinalization: !os.registered || record?.complete == false, canUninstall: record?.ready == true && record?.managedLayout == true)
         }
+        if configuration.catalogURL != nil || existing.isEmpty { try loadCatalog(for: scan.board) }
+        else { templates = [:] }
+        let software = try templates.sorted { $0.key < $1.key }.map { try $0.value.software(id: $0.key, storage: scan.board.storage) }
         return Inspection(model: scan.board.id, bootMode: scan.system.bootMode, administrator: scan.system.loginUser.isEmpty ? scan.current.administrators[0] : scan.system.loginUser, administrators: scan.current.administrators, targets: try targets(scan), software: software, existing: existing, board: scan.board.presentation, boardProfileID: scan.board.id, macOSReserveBytes: scan.board.storage.macOSReserveBytes)
     }
     public func plan(_ selection: InstallSelection) throws -> InstallPlan {
@@ -249,7 +251,8 @@ public actor InstallerEngine {
     private func resolvePackage(_ name: String) throws -> URL {
         if let url = URL(string: name), url.scheme != nil { return url }
         try require(!name.hasPrefix("/") && !name.split(separator: "/").contains(".."), "Invalid package path")
-        return configuration.repositoryURL.appending("os/" + name)
+        guard let repository = configuration.repositoryURL else { throw InstallerError("No OS image repository configured. Set --repository or use an absolute package URL in the catalog.") }
+        return repository.appending("os/" + name)
     }
     private func prepareBoot(_ os: InstalledOS, credentials: Credentials, recovery: Bool) throws {
         let core = os.system.appending("System/Library/CoreServices"), enabled = core.appending("SystemVersion.plist"), disabled = core.appending("SystemVersion-disabled.plist")
@@ -396,9 +399,9 @@ extension InstallerEngine {
         try prepareBoot(os, credentials: credentials, recovery: scan.system.bootMode.contains("recoveryOS"))
         events(InstallEvent(.restart))
     }
-    public func collectHandoffBundle(destination: URL, ipsw: URL? = nil, calibration: URL? = nil) throws {
+    public func collectHandoffBundle(destination: URL, ipsw: URL? = nil) throws {
         try require(!configuration.demo, "Firmware collection requires real hardware")
-        try HandoffBundle.collect(destination: destination, ipsw: ipsw, calibration: calibration,
+        try HandoffBundle.collect(destination: destination, ipsw: ipsw,
             resources: configuration.resourceDirectory, boards: boards, developer: configuration.developer, commands: commands, events: events)
     }
     public func rebuildFirmware(source: URL, destination: URL, boardID: String? = nil) throws {

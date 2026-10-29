@@ -7,8 +7,8 @@ enum J700 {
         minimumMacOS: "26.6", restore: QualifiedRestore.v26_6_2,
         firmwareMachine: "j700", firmware: J700Firmware(),
         presentation: BoardPresentation(symbol: "laptopcomputer", status: "Alpha",
-            notes: "Experimental j700 support. Wi-Fi collection requires this radio’s validated calibration cache.",
+            notes: "Experimental j700 support. Firmware and this radio’s calibration are collected locally.",
             powerButtonHelp: "Hold the power button at the top-right of the keyboard until startup options appear.",
-            postInstallNote: "Sleep and native boot still need qualification. Speaker playback retains the conservative driver volume cap."),
+            postInstallNote: "Sleep and native boot still need qualification. Wi-Fi operating calibration currently follows the driver’s qualified 6 GHz group 28 policy. Speaker playback retains the conservative driver volume cap."),
         availability: .developer)
 }

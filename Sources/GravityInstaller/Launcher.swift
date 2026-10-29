@@ -10,7 +10,6 @@ struct LaunchOptions {
     var firmwareBoardID: String?
     var handoff: URL?
     var handoffIPSW: URL?
-    var handoffCalibration: URL?
     var previewDirectory: URL?
     var version = false
     var deploymentPath: URL?
@@ -59,7 +58,6 @@ struct LaunchOptions {
                 let path = try value()
                 handoffIPSW = path.contains("://") ? URL(string: path) : URL(fileURLWithPath: path)
                 guard handoffIPSW != nil else { throw InstallerError("Invalid IPSW source") }
-            case "--calibration-cache": handoffCalibration = URL(fileURLWithPath: try value()).standardizedFileURL
             case "--fwextract": firmware = (URL(fileURLWithPath: try value()), URL(fileURLWithPath: try value()))
             case "--board": firmwareBoardID = try value()
             case "--render-preview": previewDirectory = URL(fileURLWithPath: try value()); configuration.demo = true
@@ -75,7 +73,7 @@ struct LaunchOptions {
             }
             i += 1
         }
-        if handoff == nil && (handoffIPSW != nil || handoffCalibration != nil) { throw InstallerError("--ipsw and --calibration-cache require --handoff-bundle") }
+        if handoff == nil && handoffIPSW != nil { throw InstallerError("--ipsw requires --handoff-bundle") }
         if handoff != nil && (firmware != nil || inspect || api || terminal || configuration.stage2URL != nil) { throw InstallerError("--handoff-bundle cannot be combined with another operation") }
         if firmwareBoardID != nil && firmware == nil { throw InstallerError("--board selects a firmware archive profile and requires --fwextract") }
     }

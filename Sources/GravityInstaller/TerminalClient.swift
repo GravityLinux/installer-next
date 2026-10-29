@@ -40,7 +40,7 @@ enum TerminalClient {
       sudo gravity-installer --inspect          Print machine inspection as JSON
       gravity-installer --demo [--tui|--api]     Preview with no disk access
       gravity-installer --stage2 /Volumes/Gravity\\ Linux/Finish\\ Installation.app/Contents/Resources/stage2.json [--tui]
-      gravity-installer --handoff-bundle DEST [--ipsw URL_OR_PATH] [--calibration-cache DIR]
+      gravity-installer --handoff-bundle DEST [--ipsw URL_OR_PATH]
       gravity-installer --fwextract SOURCE DEST  Rebuild saved firmware (optional: --board PROFILE_ID)
     Options: --resources PATH --catalog URL_OR_PATH --repository URL --developer|--no-developer
     Stage2 is automatic when launched from the installed recovery app.
@@ -69,7 +69,7 @@ enum TerminalClient {
         let engine = InstallerEngine(configuration: options.configuration, events: { if !options.inspect { output.event($0) } })
         if options.api { await serve(engine, output: output); return }
         if let destination = options.handoff {
-            try await engine.collectHandoffBundle(destination: destination, ipsw: options.handoffIPSW, calibration: options.handoffCalibration)
+            try await engine.collectHandoffBundle(destination: destination, ipsw: options.handoffIPSW)
             output.printJSON(["status": "complete", "handoff": destination.path, "diskChanges": false]); return
         }
         if let (source, dest) = options.firmware { try await engine.rebuildFirmware(source: source, destination: dest, boardID: options.firmwareBoardID); return }

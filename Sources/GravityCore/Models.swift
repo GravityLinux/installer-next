@@ -173,13 +173,13 @@ public struct Credentials: Sendable {
 }
 public struct EngineConfiguration: Sendable {
     public var resourceDirectory: URL
-    public var catalogURL: URL
-    public var repositoryURL: URL
+    public var catalogURL: URL?
+    public var repositoryURL: URL?
     public var appBundle: URL?
     public var stage2URL: URL?
     public var developer = false
     public var demo = false
-    public init(resourceDirectory: URL, catalogURL: URL = URL(string: "https://cdn.gravitylinux.org/installer/installer_data.json")!, repositoryURL: URL = URL(string: "https://cdn.gravitylinux.org")!, appBundle: URL? = nil, stage2URL: URL? = nil, demo: Bool = false) {
+    public init(resourceDirectory: URL, catalogURL: URL? = nil, repositoryURL: URL? = nil, appBundle: URL? = nil, stage2URL: URL? = nil, demo: Bool = false) {
         self.resourceDirectory = resourceDirectory; self.catalogURL = catalogURL; self.repositoryURL = repositoryURL; self.appBundle = appBundle; self.stage2URL = stage2URL; self.demo = demo
     }
 }
