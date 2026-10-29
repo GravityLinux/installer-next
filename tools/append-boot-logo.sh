@@ -1,5 +1,5 @@
 #!/bin/sh
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-2.0-only
 # Append the logo payload understood by m1n1 to a generated bootloader binary.
 set -eu
 

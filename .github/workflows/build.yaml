@@ -1,5 +1,4 @@
 name: build
-
 on:
   pull_request:
     branches: [ main ]
@@ -9,36 +8,53 @@ on:
       installer_ver:
         description: Gravity Linux installer built version string
         value: ${{ jobs.build.outputs.installer_ver }}
-
 jobs:
-  build:
+  bootloader:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - name: Install bootloader build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y gcc-aarch64-linux-gnu clang lld llvm imagemagick
+          rustup target add aarch64-unknown-none-softfloat
+      - name: Build branded M4 stage 1
+        run: |
+          make -C bootloader RELEASE=1 CHAINLOADING=1 NO_DISPLAY=1 -j4
+          make -C bootloader RELEASE=1 CHAINLOADING=1 NO_DISPLAY=1 -j4
+          sh tools/append-boot-logo.sh bootloader/build/m1n1.bin artwork
+      - uses: actions/upload-artifact@v7
+        with:
+          name: m1n1-stage1
+          path: bootloader/build/m1n1.bin
+  build:
+    needs: bootloader
+    runs-on: macos-latest
     outputs:
       installer_ver: ${{ steps.compile.outputs.installer_ver }}
-
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
           submodules: recursive
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y gcc-aarch64-linux-gnu clang lld llvm
-          sudo apt-get install --no-install-recommends -y libarchive-tools 7zip jq imagemagick
-          rustup target install aarch64-unknown-none-softfloat
-
-      - name: Build Gravity Linux installer
+      - uses: actions/download-artifact@v8
+        with:
+          name: m1n1-stage1
+          path: stage1
+      - name: Test native core and authentication terminal
+        run: ./test.sh
+      - name: Build native Gravity Linux installer
         id: compile
+        env:
+          M1N1_STAGE1: ${{ github.workspace }}/stage1/m1n1.bin
         run: |
           ./build.sh
-          echo "installer_ver=$(cat releases/latest).tar.gz" >> $GITHUB_OUTPUT
-
-      - name: Upload artefact
-        uses: actions/upload-artifact@v7
+          echo "installer_ver=$(cat releases/latest).tar.gz" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v7
         with:
           name: installer-build
-          path: |
-            releases/*
+          path: releases/*

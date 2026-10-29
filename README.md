@@ -1,128 +1,84 @@
 # Gravity Linux installer
 
-The Gravity Linux installer installs Gravity Linux on exactly one Apple Silicon
-model: the M4 Mac mini (`t8132`, `j773gap`). It prepares the Apple boot chain,
-installs the selected Gravity Linux image, and collects the device firmware
-needed by that installation.
+WIP: Experimental Gravity Linux installer
 
-## User installation link
+This will become the default installer of the Gravity Linux project.
 
-Publish the production bootstrap script at
-`https://install.gravitylinux.org`, then direct users to run:
+## Board support and firmware qualification
 
-```sh
-curl -fsSL https://install.gravitylinux.org | sh
-```
+Boards use their product numbers throughout the app, API and source files:
+`j773g` is enabled normally; `j700` is experimental and requires developer mode.
+Its exact hardware match is `j700ap`, chip `0x8140`, board `0x64`.
+Enable Developer Options in the GUI or pass `--developer` in the TUI/CLI.
+`--no-developer` explicitly disables it, including on a development channel.
 
-That script is the stable public entry point. It obtains the current installer
-version and metadata from the CDN, so the command itself does not need to change
-on each release.
+Unknown boards show a dedicated unsupported-board screen before authorization or
+downloads. Developer-only boards show an explanation and a Developer Options
+button. Developer mode never bypasses device, chip, board ID or firmware checks.
+The JSON Lines API exposes the same read-only `checkBoardSupport` method, and
+board errors include a structured `boardSupport` object with the reason, product
+number, hardware identity and available boards.
 
-## CDN release layout
+To add a board, add **one or two files**:
 
-The production bootstrap expects these objects:
+1. `Sources/GravityCore/Boards/Profiles/J<number>.swift`, defining
+   `enum J<number>` with `static let profile: BoardProfile`. Set the lowercase
+   product number as `id`, exact hardware match, restore pins, boot assets,
+   presentation details and any storage policy in that profile. Use
+   `availability: .developer` until support is ready for normal users.
+2. If its firmware needs different handling, add `Boards/J<number>Firmware.swift`
+   implementing `BoardFirmwareLoading`. Existing loaders can be reused.
 
-```
-https://install.gravitylinux.org
-https://cdn.gravitylinux.org/installer/latest
-https://cdn.gravitylinux.org/installer/installer-<version>.tar.gz
-https://cdn.gravitylinux.org/installer/installer_data.json
-https://cdn.gravitylinux.org/os/<paths referenced by installer_data.json>
-```
+The SwiftPM `BoardDiscovery` plugin automatically registers every profile file.
+There is no central board list or per-board change to the package manifest,
+installer engine, GUI or TUI. Presentation gets its product number directly from
+the profile ID. Shared restore definitions can be reused or a new restore can be
+declared in the board's profile file. Catalog entries and bundled boot assets
+still need to match the board, and hardware support needs device qualification.
+Developer selection is saved for recovery finalization, so the second stage
+retains the choice made when installing.
 
-`installer-<version>.tar.gz` contains the packaged Python installer and m1n1
-stage 1 (`boot/m1n1.bin`). Build it with `./build.sh` after initializing the
-Gravity-owned `artwork` and `bootloader` submodules. `LOGO=/path/to/logo.icns` can
-override the default `GravityLinux_logomark.icns` asset.
+The Neo collector packages MT7932 firmware, the MT793B B1 upload payload and
+IMX558 camera setfile. It archives factory BWC2 data, AID44 audio tuning and
+selected restore firmware for later rebuilds. Resident AOP/PMP/ISP/DCP/GPU
+firmware is supplied by the selected restore and iBoot, not uploaded by the
+installer firmware package.
 
-Stage 2 is not a standalone CDN bootstrap object. Build it as part of every
-Gravity OS image: m1n1 plus U-Boot and the M4 Mac mini device trees. Publish
-that image and its associated artifacts beneath `/os/`, and reference their
-relative paths and checksums from `installer_data.json`.
+The current Linux Wi-Fi ABI also requires two per-radio calibration caches.
+Provide a directory containing `mediatek/mt7932/calibration-<MAC>.bin` and
+`mediatek/mt7932/precal-<MAC>.bin`. These must be the target radio’s captures:
+the collector checks the factory MAC, file formats and RF payloads against
+that machine’s fresh BWC2 record. It does not regenerate these caches solely
+from factory data yet and never substitutes another machine’s calibration.
+Normal installation expects them under `Contents/Resources/board-calibration/j700`.
 
-The installer metadata and OS images are distribution release inputs. Fork or
-create a Gravity-owned replacement for the installer-data repository, retain
-only the `j773gap` device configuration, and change every image URL, checksum,
-name, and support URL to Gravity-owned resources before publishing.
-
-## Development and release
-
-`scripts/bootstrap.sh` is for a local server. `scripts/bootstrap-dev.sh` and
-`scripts/bootstrap-prod.sh` are configured for the Gravity CDN. The production
-release workflow must use Gravity-owned storage credentials; it must not retain
-the upstream storage-zone URL or secrets.
-
-The `artwork` and `bootloader` submodules are sourced from Gravity Linux repositories.
-Keep the bootloader's stage-1 and stage-2 M4 support in lockstep with this installer.
-
-The checked-out submodule revisions now match the local Gravity artwork and
-M4 bootloader sources. Those commits must be available at the URLs in
-`.gitmodules` before recursive cloning or CI can work from GitHub.
-
-The Python package and command are `gravity_firmware` and `gravity-fwextract`.
-The `src/gravity_firmware` symlink supports running directly from the source
-tree; the release bundle contains a real copy of that module.
-No AVD build or bundled AVD firmware is required for this release.
-
-Run tests with `PYTHONPATH=src:. python3 -m unittest discover -s tests`.
-
-### macOS 26.6.2 recovery preflight
-
-The qualified `UniversalMac_26.6.2_25G83_Restore.ipsw` stores BaseSystem as
-`022-22048-093.dmg.aea`, not a mountable DMG. Before creating partitions, the
-installer stages that member, verifies its SHA-256, decodes it with macOS's
-`/usr/bin/aea`, verifies the decoded SHA-256 and DMG checksums, and mounts it
-read-only to validate the recovery version and required M4 Wi-Fi/Bluetooth
-firmware profiles. The decoded bytes, not the AEA wrapper, are then installed
-with the existing transparent APFS compression path.
-
-`src/recovery.py` pins the exact archive, decoded image and Apple-published
-release key. This key is not a machine secret; its provenance is documented in
-that module. Adding another IPSW requires qualifying new pins. No key-server
-request or third-party decryption binary is needed during installation. Allow
-at least 4 GiB of temporary free space for decoding. Temporary mounts use unique
-directories and are detached even if firmware collection fails.
-
-Native integration test (macOS, with the installer Python environment or a
-working Python 3 installation; requires permission to set file compression):
+The packaged executable can qualify collection without installing:
 
 ```sh
-PYTHONPATH=src:tests python3 tests/validate_m4_recovery_macos.py \
-    /path/to/UniversalMac_26.6.2_25G83_Restore.ipsw /path/to/new-test-output
+"Gravity Installer.app/Contents/MacOS/gravity-installer" \
+  --developer \
+  --handoff-bundle "$HOME/neo-handoff" \
+  --calibration-cache "$HOME/neo-calibration"
 ```
 
-An HTTPS IPSW URL can replace the local path. This test runs the actual decoder,
-compression and firmware collectors, validates the CPIO/TAR inventory, and
-checks that disk0's partition layout is unchanged. It does not invoke the
-interactive installer, partition disks, personalize boot objects or change boot
-policy. A passing test validates the packaging pipeline, not hardware support
-or a completed installation. Output is retained for inspection.
+An optional `--ipsw URL_OR_PATH` selects a locally cached copy of the qualified
+restore. The profile still enforces the restore identity and recovery hashes.
+Only localhost HTTP is allowed for development; other downloads require HTTPS.
 
-## License
+This command does not partition disks or register a boot object. It produces
+`firmware.tar`, `firmware.cpio`, `all_firmware.tar.gz`, a manifest and handoff
+metadata. Success requires an archive-only rebuild to reproduce all three
+firmware outputs byte for byte. Do not confuse this with qualification of
+native Linux boot, OS installation, suspend or all wireless operating modes.
+`j700` OS catalog entries must explicitly declare board support; the legacy
+catalog fallback is retained for `j773g` only.
 
-This project is distributed under the MIT license. See [LICENSE](LICENSE).
-Upstream copyright notices are retained where required by that license.
+## Legal
 
-### M4 Bluetooth factory calibration
+Licensed under the GPL 2.0. This is a from scratch rewrite, but the existing
+Python/CLI based Asahi installer under the MIT license was used as a reference.
+Upstream attribution is retained in the existing [LICENSE](LICENSE) file and
+included in the app's copy of that file.
 
-For J773g, firmware collection reads the local machine's
-`BWCl-sakhalin-4388-C2-*` factory records and extracts the opaque `BTBF`
-beamforming payload. It checks the IMG4/IM4P and record structure, size and
-`BLOB` marker; it does not verify Apple's signature. Conflicting records are
-rejected. No factory record or calibration data is bundled with the installer.
-
-The `/chosen` Bluetooth address binds the output to its radio:
-`vendorfw/u-boot/brcm/brcmbt4388-<12 lowercase hex address digits>-bf.bin`
-on the ESP. The raw firmware archive saves the payload, address, SHA-256 and
-source-record hashes so `gravity-fwextract` can reproduce it during updates.
-U-Boot loads only the file matching the live DT address and supplies
-`brcm,taurus-bf-cal-blob` before Linux boots. Linux consumes the DT property.
-Older archives without calibration remain usable but cannot supply Bluetooth
-calibration; recollect firmware on the original Mac to add it.
-
-Wi-Fi follows the same path: the `WCAL` record from BWCl is bound to
-`/chosen/mac-address-wifi0`, saved in `apple/wifi-calibration.{bin,json}` in
-the raw archive, and written to
-`vendorfw/u-boot/brcm/brcmfmac4388-<12 lowercase hex address digits>-cal.bin`.
-U-Boot injects this into the Wi-Fi node's `brcm,cal-blob` property. Existing
-DT calibration takes precedence for both radios.
+Artwork, the bootloader submodule, and embedded design fonts retain their own
+licenses.
