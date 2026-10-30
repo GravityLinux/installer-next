@@ -118,10 +118,11 @@ public actor InstallerEngine {
         try require(!selection.name.isEmpty && selection.name.utf8.count <= 64 && !selection.name.contains("/") && !selection.name.unicodeScalars.contains { $0.value < 32 }, "Choose a volume name of at most 64 bytes without slashes or control characters")
         let minimum = alignDown(software.minimumBytes)
         try require(target.canAllocate(selection.bytes, minimumBytes: software.minimumBytes), "Choose an installation size between \(sizeText(minimum)) and \(sizeText(target.maximumBytes))")
-        let resize = target.resizeBytes(for: selection.bytes), after = target.resizedMacOSBytes(for: selection.bytes)
-        var changes = [after.map { "\(resize > 0 ? "Shrink" : "Grow") \(target.name) from \(sizeText(target.totalBytes)) to \(sizeText($0))" } ?? "Use existing unallocated space"]
+        let resize = target.shrinkBytes(for: selection.bytes), after = target.resizedMacOSBytes(for: selection.bytes)
+        var changes = [after.map { "Shrink \(target.name) from \(sizeText(target.totalBytes)) to \(sizeText($0))" } ?? "Use existing unallocated space"]
         if resize > 0 && target.unallocatedBytes > 0 { changes.append("Include all \(sizeText(target.unallocatedBytes)) of existing adjacent unallocated space") }
-        if resize < 0 { changes.append("Return \(sizeText(-resize)) of existing unallocated space to macOS") }
+        let unused = target.unusedBytes(for: selection.bytes)
+        if unused > 0 { changes.append("Leave \(sizeText(unused)) unallocated before \(selection.name)") }
         if software.mode == .linux {
             changes += ["Create the startup and Linux partitions for \(software.name)"]
             let fixed = layoutBytes ?? software.minimumBytes
@@ -167,9 +168,8 @@ public actor InstallerEngine {
         guard let selected = fresh.partitions.first(where: { $0.id == plan.selection.targetID }), let target = try targets(fresh).first(where: { $0.id == selected.id }) else { throw InstallerError("Selected space no longer exists") }
         try require(plan.selection.bytes <= target.maximumBytes, "Available space changed; review a smaller installation")
         var after = selected.name
-        let resize = target.resizeBytes(for: plan.selection.bytes)
         if let macOSBytes = target.resizedMacOSBytes(for: plan.selection.bytes) {
-            events(resize < 0 ? InstallEvent(.resize, help: "Apple’s APFS tool is expanding macOS into unused space. Let it finish before continuing.", title: "Giving macOS more space") : InstallEvent(.resize))
+            events(InstallEvent(.resize))
             _ = try fresh.disk.action(["apfs", "resizeContainer", selected.name, String(macOSBytes)])
             try fresh.disk.refresh()
             guard let free = try fresh.disk.partitions(fresh.name).first(where: { $0.free && $0.name == selected.name }) else { throw InstallerError("Resize completed but no adjacent free space was found; check the disk before continuing") }
@@ -179,7 +179,7 @@ public actor InstallerEngine {
             try require(fresh.partitions.contains { $0.free && $0.name == selected.name && $0.size >= plan.selection.bytes }, "Adjacent unallocated space changed; review the installation again")
         }
         events(InstallEvent(.createStub))
-        let startup = try fresh.disk.addPartition(after: after, type: "apfs", label: plan.selection.name, size: fresh.board.storage.stubBytes, disk: fresh.name)
+        let startup = try fresh.disk.addPartition(after: after, type: "apfs", label: plan.selection.name, size: fresh.board.storage.stubBytes, disk: fresh.name, leavingFreeBefore: target.unusedBytes(for: plan.selection.bytes))
         let os = try stub.install(into: startup, authenticatingWith: fresh.current)
         var record = Stage2Record(version: 1, vgid: os.vgid, prebootUUID: os.prebootUUID, name: plan.selection.name, macOSPartitionUUID: fresh.current.partition.uuid, partitions: [SavedPartition(startup)], ready: false, complete: false)
         record.developerMode = configuration.developer; record.boardProfileID = fresh.board.id; record.hardware = fresh.system.hardware

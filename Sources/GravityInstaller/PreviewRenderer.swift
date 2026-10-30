@@ -11,7 +11,7 @@ import GravityCore
         var inspection = try await model.engine.inspect(); inspection.software = try await model.engine.availableSoftware()
         model.inspection = inspection; model.softwareID = inspection.software.first?.id ?? ""
         guard model.allocationBytes == 0 && abs(model.macOSGB-model.partitionTotalGB) < 0.001 else { throw InstallerError("An unpartitioned install did not start with Linux at zero") }
-        model.setMacOSGB(model.partitionTotalGB - 120)
+        model.setPartitionBoundaryGB(model.partitionTotalGB - 120)
         guard abs(Double(model.allocationBytes)/1e9 - 120) < 0.002 else { throw InstallerError("Moving the boundary left did not allocate space to Linux") }
         model.plan = try await model.engine.plan(InstallSelection(targetID: model.targetID, softwareID: model.softwareID, bytes: 120_000_000_000))
         let status = try await model.engine.stage2Status()
@@ -49,20 +49,47 @@ import GravityCore
         try await snapshot(InstallerView(model: model), size: NSSize(width: 880, height: 600), to: directory.appendingPathComponent("storage-no-shrink.png"))
         model.inspection = try changing(model.inspection!, ["targets": [["id": "demo-no-shrink", "name": "Macintosh HD", "kind": "resize", "totalBytes": 80_000_000_000, "freeBytes": 20_000_000_000,
             "maximumBytes": 97_998_307_328, "existingFreeBytes": 79_999_008_768]]])
+        try await checkPartitionDrag(model: model, directory: directory)
         try await snapshot(InstallerView(model: model), size: NSSize(width: 880, height: 600), to: directory.appendingPathComponent("storage-existing-space.png"))
-        model.setMacOSGB(70)
+        model.setPartitionBoundaryGB(70)
         guard model.allocationBytes > model.target!.unallocatedBytes else { throw InstallerError("Moving left did not reclaim more macOS space") }
         try await snapshot(InstallerView(model: model), size: NSSize(width: 880, height: 600), to: directory.appendingPathComponent("storage-extra-shrink.png"))
-        model.setMacOSGB(100)
-        guard model.allocationBytes < model.target!.unallocatedBytes && abs(model.macOSGB - 100) < 0.002 else { throw InstallerError("Moving right did not give more space to macOS") }
-        try await snapshot(InstallerView(model: model), size: NSSize(width: 880, height: 600), to: directory.appendingPathComponent("storage-more-macos.png"))
+        model.setPartitionBoundaryGB(100)
+        guard model.allocationBytes < model.target!.unallocatedBytes && model.macOSGB == 80 && abs(Double(model.target!.unusedBytes(for: model.allocationBytes))/1e9 - 20) < 0.002 else { throw InstallerError("Moving right did not leave space unallocated while keeping macOS unchanged") }
+        try await snapshot(InstallerView(model: model), size: NSSize(width: 880, height: 600), to: directory.appendingPathComponent("storage-unallocated.png"))
         model.inspection = try changing(inspection, ["targets": [["id": "demo-insufficient", "name": "Macintosh HD", "kind": "resize", "totalBytes": 80_000_000_000, "freeBytes": 3_000_000_000,
             "maximumBytes": 999_292_928, "existingFreeBytes": 0]]])
         model.targetID = "demo-insufficient"; model.sizeGB = 0
         guard model.insufficientCapacity && !model.validAllocation else { throw InstallerError("Insufficient capacity was not blocked") }
         try await snapshot(InstallerView(model: model), size: NSSize(width: 880, height: 600), to: directory.appendingPathComponent("storage-insufficient.png"))
-        try JSONSerialization.data(withJSONObject: ["noFreeStartsLinuxAtZero": true, "freeSpaceSetsProportionalStart": true, "leftGivesLinuxMore": true, "rightGivesMacOSMore": true, "insufficientCapacityBlocked": true], options: [.prettyPrinted, .sortedKeys]).write(to: directory.appendingPathComponent("allocation-check.json"))
+        try JSONSerialization.data(withJSONObject: ["noFreeStartsLinuxAtZero": true, "freeSpaceSetsProportionalStart": true, "leftGivesLinuxMore": true, "rightLeavesUnusedSpace": true, "macOSNeverGrows": true, "insufficientCapacityBlocked": true], options: [.prettyPrinted, .sortedKeys]).write(to: directory.appendingPathComponent("allocation-check.json"))
         print("Rendered twenty-four demo views to \(directory.path)")
+    }
+    private static func checkPartitionDrag(model: InstallerModel, directory: URL) async throws {
+        let host = NSHostingView(rootView: PartitionControlsCheck(model: model).frame(width: 600, height: 128))
+        let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 600, height: 128), styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false; window.contentView = host
+        window.makeKeyAndOrderFront(nil); host.layoutSubtreeIfNeeded()
+        defer { window.close() }
+        try await Task.sleep(nanoseconds: 150_000_000)
+        func drag(from: CGFloat, to: CGFloat, y: CGFloat) async throws {
+            for (index, type) in [NSEvent.EventType.leftMouseDown, .leftMouseDragged, .leftMouseUp].enumerated() {
+                guard let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: index == 0 ? from : to, y: y), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: index, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1) else { throw InstallerError("Could not create a partition drag event") }
+                NSApp.postEvent(event, atStart: false)
+            }
+            try await Task.sleep(nanoseconds: 300_000_000)
+        }
+        let before = model.allocationBytes
+        try await drag(from: 300, to: 260, y: 90)
+        guard model.allocationBytes > before && model.macOSGB < 80 else { throw InstallerError("Dragging the partition diagram did not update the shared slider value") }
+        try await drag(from: 100, to: 220, y: 90)
+        guard model.macOSGB == 80 && model.target!.unusedBytes(for: model.allocationBytes) > 0 else { throw InstallerError("Dragging the gray segment right did not leave unused space") }
+        let beforeSlider = model.allocationBytes
+        let thumb = CGFloat(model.partitionBoundaryGB / model.partitionTotalGB) * 580 + 10
+        try await drag(from: thumb, to: thumb-40, y: 20)
+        guard model.allocationBytes > beforeSlider else { throw InstallerError("Dragging the slider did not update the shared diagram value") }
+        try JSONSerialization.data(withJSONObject: ["dividerDragUpdatesAllocation": true, "graySegmentDragLeavesUnusedSpace": true, "sliderDragUpdatesDiagram": true], options: [.prettyPrinted, .sortedKeys]).write(to: directory.appendingPathComponent("partition-drag-check.json"))
+        model.sizeGB = Double(model.target!.unallocatedBytes) / 1e9
     }
     private static func checkDeveloperWindow(model: InstallerModel, directory: URL) async throws {
         guard let installer = NSApp.windows.first(where: { $0.isVisible && $0.title == "Install Gravity Linux" }) else { throw InstallerError("The installer window is missing") }
@@ -102,5 +129,17 @@ import GravityCore
         let host = NSHostingView(rootView: view)
         let size = host.fittingSize
         try await snapshot(view, size: NSSize(width: 520, height: ceil(size.height)), to: url)
+    }
+}
+
+private struct PartitionControlsCheck: View {
+    @ObservedObject var model: InstallerModel
+    var body: some View {
+        VStack(spacing: 16) {
+            if let target = model.target {
+                PartitionDiagram(target: target, boundaryGB: Binding(get: { model.partitionBoundaryGB }, set: { model.setPartitionBoundaryGB($0) }))
+                PartitionSizeSlider(value: Binding(get: { model.partitionBoundaryGB }, set: { model.setPartitionBoundaryGB($0) }), bounds: 0...model.partitionTotalGB)
+            }
+        }
     }
 }

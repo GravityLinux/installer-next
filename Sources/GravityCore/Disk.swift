@@ -136,7 +136,10 @@ final class DiskManager {
         _ = try action(["mount", name]); let info = try get(["info", "-plist", name]); let path = string(info["MountPoint"])
         try require(!path.isEmpty, "No mount point for \(name)"); return URL(fileURLWithPath: path)
     }
-    func addPartition(after: String, type: String, label: String, size: Int64, disk: String) throws -> DiskPartition {
+    func addPartition(after: String, type: String, label: String, size: Int64, disk: String, leavingFreeBefore: Int64 = 0) throws -> DiskPartition {
+        if leavingFreeBefore > 0 {
+            return try addPartitionLeavingGap(after: after, type: type, label: label, size: size, disk: disk, gapBytes: leavingFreeBefore)
+        }
         let before = Set(try partitions(disk).filter { !$0.free }.map(\.uuid))
         _ = try action(["addPartition", after, type, label, String(size)]); try refresh()
         func canonical(_ value: String) -> String {
@@ -146,6 +149,38 @@ final class DiskManager {
         let candidates = try partitions(disk).filter { !$0.free && !before.contains($0.uuid) && canonical($0.type) == canonical(type) }
         try require(candidates.count == 1, "Could not uniquely identify the new \(type) partition")
         return candidates[0]
+    }
+    /// diskutil inserts directly after a partition. Occupy only the requested
+    /// empty prefix temporarily, insert the startup partition, then free that
+    /// prefix again. Never format or resize an existing partition to make a gap.
+    private func addPartitionLeavingGap(after: String, type: String, label: String, size: Int64, disk: String, gapBytes: Int64) throws -> DiskPartition {
+        guard let gap = try partitions(disk).first(where: { $0.free && $0.name == after }) else { throw InstallerError("The selected unallocated space no longer exists") }
+        try require(gapBytes == alignDown(gapBytes) && size > 0 && gapBytes <= gap.size - size, "The selected unallocated space is too small")
+        let spacer = try addPartition(after: after, type: "%Linux%", label: "%noformat%", size: gapBytes, disk: disk)
+        func releaseSpacer() throws {
+            try refresh()
+            guard let current = try partitions(disk).first(where: { !$0.free && $0.uuid == spacer.uuid }),
+                  current.offset == spacer.offset && current.size == spacer.size && current.type == spacer.type,
+                  current.offset >= gap.offset && current.offset + current.size <= gap.offset + gap.size else {
+                throw InstallerError("The temporary space reservation changed; check the disk before continuing")
+            }
+            _ = try action(["eraseVolume", "free", "none", current.name]); try refresh()
+            try require(!partitions(disk).contains { !$0.free && $0.uuid == spacer.uuid }, "Could not release the temporary space reservation")
+        }
+        let created: DiskPartition
+        do {
+            try require(spacer.size == gapBytes && spacer.offset >= gap.offset && spacer.offset + spacer.size <= gap.offset + gap.size, "The temporary space reservation has an unexpected size or location")
+            created = try addPartition(after: spacer.name, type: type, label: label, size: size, disk: disk)
+            try require(created.offset == spacer.offset + spacer.size && created.size == size && created.offset + created.size <= gap.offset + gap.size, "The new partition has an unexpected size or location")
+        } catch {
+            let creationError = error
+            do { try releaseSpacer() }
+            catch { throw InstallerError("\(creationError.localizedDescription) Could not release the temporary space reservation: \(error.localizedDescription)") }
+            throw creationError
+        }
+        try releaseSpacer()
+        guard let result = try partitions(disk).first(where: { !$0.free && $0.uuid == created.uuid }) else { throw InstallerError("The new partition disappeared while releasing unused space") }
+        return result
     }
     func prepareVolumes(_ part: DiskPartition) throws -> DiskPartition {
         let reference = string(part.container["ContainerReference"])

@@ -72,10 +72,11 @@ enum Screen: Int { case checking = -1, welcome, storage, software, review, insta
     var maximumGB: Double { Double(target?.maximumBytes ?? 0) / 1e9 }
     var allocationBytes: Int64 { target?.boundedAllocation(Int64((sizeGB * 1e9).rounded())) ?? Int64((sizeGB * 1e9).rounded()) }
     var partitionTotalGB: Double { Double(target?.diagramTotalBytes ?? 0) / 1e9 }
-    var macOSGB: Double { partitionTotalGB - Double(allocationBytes) / 1e9 }
+    var partitionBoundaryGB: Double { partitionTotalGB - Double(allocationBytes) / 1e9 }
+    var macOSGB: Double { target.map { $0.kind == "resize" ? Double($0.totalBytes - $0.shrinkBytes(for: allocationBytes)) / 1e9 : 0 } ?? 0 }
     var insufficientCapacity: Bool { target.map { !$0.canAllocate($0.maximumBytes, minimumBytes: requiredInstallBytes) } ?? true }
     var validAllocation: Bool { target?.canAllocate(allocationBytes, minimumBytes: requiredInstallBytes) == true }
-    func setMacOSGB(_ value: Double) { sizeGB = max(0, min(maximumGB, partitionTotalGB - value)) }
+    func setPartitionBoundaryGB(_ value: Double) { sizeGB = max(0, min(maximumGB, partitionTotalGB - value)) }
     var active: Int {
         switch screen {
         case .storage: return 1

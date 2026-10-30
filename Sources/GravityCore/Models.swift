@@ -134,11 +134,11 @@ public struct StorageTarget: Codable, Identifiable, Equatable, Sendable {
     public var existingFreeBytes: Int64? = nil
     public var unallocatedBytes: Int64 { kind == "free" ? alignDown(totalBytes) : existingFreeBytes ?? 0 }
     public var diagramTotalBytes: Int64 { totalBytes + (kind == "resize" ? unallocatedBytes : 0) }
-    /// Positive reclaims space from macOS; negative gives unused space to it.
-    public func resizeBytes(for allocation: Int64) -> Int64 { kind == "resize" ? allocation - unallocatedBytes : 0 }
-    public func shrinkBytes(for allocation: Int64) -> Int64 { max(0, resizeBytes(for: allocation)) }
+    /// Existing free space is used first. macOS is only ever shrunk.
+    public func shrinkBytes(for allocation: Int64) -> Int64 { kind == "resize" ? max(0, allocation - unallocatedBytes) : 0 }
+    public func unusedBytes(for allocation: Int64) -> Int64 { max(0, unallocatedBytes - allocation) }
     public func resizedMacOSBytes(for allocation: Int64) -> Int64? {
-        let change = resizeBytes(for: allocation)
+        let change = shrinkBytes(for: allocation)
         return change == 0 ? nil : alignDown(totalBytes - change)
     }
     public func boundedAllocation(_ requestedBytes: Int64) -> Int64 { min(maximumBytes, max(0, alignDown(requestedBytes))) }

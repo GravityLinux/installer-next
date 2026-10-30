@@ -99,6 +99,8 @@ The UI uses the design's Geist fonts, shipped under the bundled font license.
 Preview rendering also checks the real Developer Options window for extra
 title-bar space and verifies that Done leaves the installer open even when the
 installer has keyboard focus. Developer Options sizes itself to its contents.
+It also sends native mouse events to the partition divider, gray segment and
+slider to verify that all three update the same allocation.
 `gravity-installer --check-window-close /tmp/window-close.json` runs a separate
 demo process that verifies the red close button cannot hide an active install
 and quits an idle installer even with Developer Options open. It must exit
@@ -134,8 +136,13 @@ this Mac and reused only when the server validator and length still match.
 The partition slider represents the macOS/Linux boundary across their combined
 space. With no unallocated space it starts at the far right with Linux at zero.
 With adjacent unallocated space it starts proportionally at the current macOS
-boundary, initially giving Linux that free space. Moving left gives Linux more;
-moving right gives macOS more, growing macOS into unused space when needed.
+boundary, initially giving Linux that free space. Dragging the gray divider or
+the diagram also adjusts the slider. Moving left gives Linux more; moving right
+restores any space being reclaimed from macOS, then leaves unused space between
+macOS and Gravity Linux. macOS is never enlarged. The plan and review show that
+gap explicitly. Startup partition creation temporarily reserves only this empty
+prefix and releases it after placing the startup partition, without formatting
+or resizing macOS.
 There are no separate storage-choice rows. The default leaves **2 GB free inside macOS**,
 subject to APFS's reported hard minimum. The preferred-size recommendation does
 not impose an additional reserve. Selecting exactly the existing free extent does

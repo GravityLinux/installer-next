@@ -21,19 +21,23 @@ private struct ResizeLimits: CommandRunning {
     #expect(alignDown(partition.size - available) - 60_000_000_000 >= margin)
     #expect(try DiskManager(commands: ResizeLimits(hard: partition.size, preferred: partition.size)).maximumResize(partition, reserveBytes: margin) == 0)
 }
-@Test func boundaryTradesSpaceBetweenMacOSAndLinuxInBothDirections() {
+@Test func allocationShrinksMacOSOnlyAfterUsingExistingSpace() {
     let existing = alignDown(80_000_000_000), extra = alignDown(10_000_000_000)
     var target = StorageTarget(id: "macOS", name: "Macintosh HD", kind: "resize", totalBytes: 80_000_000_000, freeBytes: 20_000_000_000, maximumBytes: existing + extra)
     target.existingFreeBytes = existing
     #expect(target.diagramTotalBytes == target.totalBytes + existing)
     #expect(target.boundedAllocation(0) == 0)
-    #expect(target.resizeBytes(for: existing) == 0)
+    #expect(target.shrinkBytes(for: existing) == 0)
     #expect(target.resizedMacOSBytes(for: existing) == nil)
     #expect(target.shrinkBytes(for: existing) == 0)
     #expect(target.shrinkBytes(for: existing + extra) == extra)
     #expect(target.resizedMacOSBytes(for: existing + extra) == alignDown(target.totalBytes - extra))
-    #expect(target.resizeBytes(for: existing - extra) == -extra)
-    #expect(target.resizedMacOSBytes(for: existing - extra) == alignDown(target.totalBytes + extra))
+    #expect(target.shrinkBytes(for: existing - extra) == 0)
+    #expect(target.resizedMacOSBytes(for: existing - extra) == nil)
+    #expect(target.unusedBytes(for: existing - extra) == extra)
+    #expect(target.unusedBytes(for: existing + extra) == 0)
+    #expect(target.resizedMacOSBytes(for: 0) == nil)
+    #expect(target.unusedBytes(for: 0) == existing)
     #expect(!target.canAllocate(0, minimumBytes: 30_000_000_000))
     #expect(target.canAllocate(alignDown(30_000_000_000), minimumBytes: 30_000_000_000))
     #expect(target.boundedAllocation(Int64.max) == target.maximumBytes)
