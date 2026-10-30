@@ -71,7 +71,7 @@ enum TerminalClient {
     }
     static func run(_ options: LaunchOptions) async throws {
         let output = TerminalOutput(api: options.api || options.inspect || options.handoff != nil)
-        let engine = InstallerSession(configuration: options.configuration, events: { if !options.inspect { output.event($0) } })
+        let engine = InstallerSession(configuration: try options.resolvedConfiguration(), events: { if !options.inspect { output.event($0) } })
         if options.api { await serve(engine, output: output); return }
         if let destination = options.handoff {
             try await engine.collectHandoffBundle(destination: destination, ipsw: options.handoffIPSW)

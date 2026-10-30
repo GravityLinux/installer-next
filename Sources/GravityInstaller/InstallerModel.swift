@@ -40,15 +40,12 @@ enum Screen: Int { case checking = -1, welcome, storage, software, review, insta
         createEngine()
     }
     func createEngine() {
-        var configuration = launch.configuration; configuration.developer = developer
-        configuration.developerOptions = developerOptions
-        if developer, let sources = try? developerOptions.sources(defaultCatalog: configuration.catalogURL, defaultRepository: configuration.repositoryURL) {
-            configuration.catalogURL = sources.catalog; configuration.repositoryURL = sources.repository
-        }
+        let configuration = try! launch.resolvedConfiguration(developer: developer, options: developerOptions)
         engine = InstallerSession(configuration: configuration) { [weak self] event in Task { @MainActor in self?.receive(event) } }
     }
     func applyDeveloperOptions(enabled: Bool, options: DeveloperOptions) async {
         let previous = screen, oldTarget = targetID, oldSoftware = softwareID, oldSize = sizeGB
+        if !launch.configuration.demo { DeveloperPreferences(enabled: enabled, options: options).save() }
         developer = enabled; developerOptions = options; developerSheet = false; createEngine(); await load()
         if inspection != nil && [.welcome, .storage, .software].contains(previous) {
             if inspection?.targets.contains(where: { $0.id == oldTarget && $0.unavailableReason == nil }) == true { targetID = oldTarget; sizeGB = oldSize }

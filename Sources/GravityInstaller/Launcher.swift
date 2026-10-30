@@ -19,7 +19,8 @@ struct LaunchOptions {
     var installerBase: URL?
     var latestURL: URL?
     var forceDeployment = false
-    init(_ arguments: [String] = Array(CommandLine.arguments.dropFirst())) throws {
+    private var catalogOverridden = false, repositoryOverridden = false
+    init(_ arguments: [String] = Array(CommandLine.arguments.dropFirst()), preferences: DeveloperPreferences? = nil) throws {
         let bundle = Bundle.main.bundleURL.pathExtension == "app" ? Bundle.main.bundleURL : nil
         let resources = Bundle.main.resourceURL ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Resources")
         let stage2 = resources.appendingPathComponent("stage2.json")
@@ -28,6 +29,11 @@ struct LaunchOptions {
         if let bundle, let distribution = try InstallerDistribution.read(from: bundle) {
             if let url = distribution.catalogURL { configuration.catalogURL = url }
             if let url = distribution.repositoryURL { configuration.repositoryURL = url }
+        }
+        // Demo and preview processes must neither inherit nor change real settings.
+        if !configuration.demo && !arguments.contains(where: { ["--demo", "--render-preview", "--check-window-close"].contains($0) }) {
+            let saved = preferences ?? DeveloperPreferences.load()
+            configuration.developer = saved.enabled; configuration.developerOptions = saved.options
         }
         var i = 0
         func value() throws -> String {
@@ -55,7 +61,8 @@ struct LaunchOptions {
                 let option = arguments[i], path = try value()
                 let url = path.contains("://") ? URL(string: path) : URL(fileURLWithPath: path)
                 guard let url else { throw InstallerError("Invalid image metadata source") }
-                if option == "--catalog" { configuration.catalogURL = url } else { configuration.repositoryURL = url }
+                if option == "--catalog" { configuration.catalogURL = url; catalogOverridden = true }
+                else { configuration.repositoryURL = url; repositoryOverridden = true }
             case "--stage2":
                 if i + 1 < arguments.count && !arguments[i+1].hasPrefix("--") { configuration.stage2URL = URL(fileURLWithPath: try value()).standardizedFileURL }
                 else if configuration.stage2URL == nil && !configuration.demo { throw InstallerError("--stage2 requires the installed stage2.json path") }
@@ -84,6 +91,18 @@ struct LaunchOptions {
         if handoff == nil && handoffIPSW != nil { throw InstallerError("--ipsw requires --handoff-bundle") }
         if handoff != nil && (firmware != nil || inspect || api || terminal || configuration.stage2URL != nil) { throw InstallerError("--handoff-bundle cannot be combined with another operation") }
         if firmwareBoardID != nil && firmware == nil { throw InstallerError("--board selects a firmware archive profile and requires --fwextract") }
+        _ = try resolvedConfiguration()
+    }
+    func resolvedConfiguration(developer: Bool? = nil, options: DeveloperOptions? = nil) throws -> EngineConfiguration {
+        var result = configuration
+        result.developer = developer ?? configuration.developer
+        result.developerOptions = options ?? configuration.developerOptions
+        if result.developer {
+            let sources = try result.developerOptions.sources(defaultCatalog: configuration.catalogURL, defaultRepository: configuration.repositoryURL)
+            if !catalogOverridden { result.catalogURL = sources.catalog }
+            if !repositoryOverridden { result.repositoryURL = sources.repository }
+        }
+        return result
     }
 }
 

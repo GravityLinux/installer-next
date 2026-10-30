@@ -64,8 +64,12 @@ For the TUI, replace the final `sh` with `sh -s -- --tui`. `--demo` previews the
 interface, `--update` updates without launching, and `--version` prints the
 installed version. The bootstrap saves its download configuration in the app;
 later launches do not need the server's temporary files. Developer Options starts
-disabled on ordinary launches, including development channel builds. Enable it
-explicitly to test experimental features.
+disabled until explicitly enabled. Clicking Done saves the enable flag and every
+option in the current user's macOS preferences at
+`~/Library/Preferences/org.gravitylinux.installer.plist` (`developerSettings`).
+They survive app restarts and reinstalls, and GUI/TUI/API launches read the same
+settings. Explicit command-line flags override them for that launch. Demo and
+preview runs do not read or write these preferences. Passwords are never saved.
 
 `INSTALLER_BASE` selects the app-update artifacts. Available OS images and their
 layouts are fetched from `https://cdn.gravitylinux.org/installer/installer_data.json`;
