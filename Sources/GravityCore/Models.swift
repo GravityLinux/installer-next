@@ -294,6 +294,9 @@ public struct SoftwareTemplate: Codable, Sendable {
         return board.installationModes.contains(mode)
     }
     public static let bootloaderOnly = SoftwareTemplate(name: "Bootloader only", mode: .bootloader, developer: true)
+    static func bootloaderOnly(bootObject: String) -> SoftwareTemplate {
+        SoftwareTemplate(name: bootloaderOnly.name, mode: .bootloader, bootObject: bootObject, developer: true)
+    }
     var layout: [PartitionTemplate] {
         switch mode {
         case .linux: return partitions

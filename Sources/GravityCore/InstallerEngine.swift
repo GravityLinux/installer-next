@@ -54,7 +54,7 @@ public actor InstallerEngine {
         events(InstallEvent(.metadata))
         templates = try ReleaseCatalog.candidates(ReleaseCatalog.fetch(configuration.catalogURL), board: board,
             developer: configuration.developer, repository: configuration.repositoryURL)
-        if configuration.developer && board.installationModes.contains(.bootloader) { templates[board.id + ":local:bootloader"] = .bootloaderOnly }
+        if configuration.developer && board.installationModes.contains(.bootloader) { templates[board.id + ":local:bootloader"] = .bootloaderOnly(bootObject: board.boot.stage1) }
     }
     private func targets(_ scan: Scan) throws -> [StorageTarget] {
         var result: [StorageTarget] = []
