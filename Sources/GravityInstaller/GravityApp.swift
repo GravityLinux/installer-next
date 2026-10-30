@@ -17,10 +17,15 @@ import GravityCore
     var body: some Scene {
         Window("Install Gravity Linux", id: "installer") {
             InstallerView(model: model).frame(minWidth: 880, minHeight: 600)
-                .background(InstallerWindowStyle()).ignoresSafeArea()
+                .background(InstallerWindowStyle(model: model)).ignoresSafeArea()
                 .onAppear { delegate.model = model; NSApp.activate(ignoringOtherApps: true) }
                 .task {
                     await model.load()
+                    if let report = model.launch.closeWindowCheck {
+                        do { try await WindowCloseCheck.run(model: model, report: report) }
+                        catch { FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8)); exit(1) }
+                        return
+                    }
                     if let directory = model.launch.previewDirectory {
                         do { try await PreviewRenderer.render(model: model, to: directory); exit(0) }
                         catch { FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8)); exit(1) }

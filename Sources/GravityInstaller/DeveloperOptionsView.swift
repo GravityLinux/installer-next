@@ -107,6 +107,7 @@ private struct ReleaseChannelPicker: NSViewRepresentable {
 @MainActor final class DeveloperOptionsWindow {
     static let shared = DeveloperOptionsWindow()
     private var window: NSWindow?
+    func close() { window?.close(); window = nil }
     func show(model: InstallerModel) {
         if let window, window.isVisible { window.makeKeyAndOrderFront(nil); return }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 220), styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)

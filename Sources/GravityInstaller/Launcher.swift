@@ -11,6 +11,7 @@ struct LaunchOptions {
     var handoff: URL?
     var handoffIPSW: URL?
     var previewDirectory: URL?
+    var closeWindowCheck: URL?
     var version = false
     var deploymentPath: URL?
     var expectedRelease: String?
@@ -67,6 +68,7 @@ struct LaunchOptions {
             case "--fwextract": firmware = (URL(fileURLWithPath: try value()), URL(fileURLWithPath: try value()))
             case "--board": firmwareBoardID = try value()
             case "--render-preview": previewDirectory = URL(fileURLWithPath: try value()); configuration.demo = true
+            case "--check-window-close": closeWindowCheck = URL(fileURLWithPath: try value()); configuration.demo = true
             case "--version": version = true
             case "--deploy-app": deploymentPath = URL(fileURLWithPath: try value()).standardizedFileURL
             case "--expected-release": expectedRelease = try value()

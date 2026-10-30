@@ -99,6 +99,11 @@ The UI uses the design's Geist fonts, shipped under the bundled font license.
 Preview rendering also checks the real Developer Options window for extra
 title-bar space and verifies that Done leaves the installer open even when the
 installer has keyboard focus. Developer Options sizes itself to its contents.
+`gravity-installer --check-window-close /tmp/window-close.json` runs a separate
+demo process that verifies the red close button cannot hide an active install
+and quits an idle installer even with Developer Options open. It must exit
+naturally with status zero; a timeout reports a lingering process. Closing the
+idle main window ends the app and releases its update lock.
 
 Startup inspection and review use read-only queries and never mount volumes or
 read privileged boot policy. Ask for credentials after Review. The GUI/TUI starts

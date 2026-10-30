@@ -45,10 +45,19 @@ struct InstallerTitleBar: View {
 
 /// Keep real AppKit window buttons while matching the design's 44-point chrome.
 struct InstallerWindowStyle: NSViewRepresentable {
+    var model: InstallerModel? = nil
+    func makeCoordinator() -> InstallerMainWindowDelegate { InstallerMainWindowDelegate() }
     func makeNSView(context: Context) -> NSView { NSView() }
     func updateNSView(_ view: NSView, context: Context) {
         DispatchQueue.main.async {
             guard let window = view.window else { return }
+            if let model {
+                context.coordinator.model = model
+                if window.delegate !== context.coordinator {
+                    context.coordinator.original = window.delegate
+                    window.delegate = context.coordinator
+                }
+            }
             window.titlebarAppearsTransparent = true; window.titleVisibility = .hidden
             window.styleMask.insert(.fullSizeContentView)
             window.backgroundColor = .white; window.isMovableByWindowBackground = true
@@ -57,6 +66,27 @@ struct InstallerWindowStyle: NSViewRepresentable {
                 button.setFrameOrigin(NSPoint(x: CGFloat(16 + 20 * index), y: parent.bounds.height - 28))
             }
         }
+    }
+}
+
+/// Preserve SwiftUI's window callbacks while making the installer's red close
+/// button quit the idle app, even if a utility window is still present.
+final class InstallerMainWindowDelegate: NSObject, NSWindowDelegate {
+    weak var original: NSWindowDelegate?
+    weak var model: InstallerModel?
+    @MainActor func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if model?.busy == true && model?.screen == .installing { NSSound.beep(); return false }
+        return original?.windowShouldClose?(sender) ?? true
+    }
+    @MainActor func windowWillClose(_ notification: Notification) {
+        original?.windowWillClose?(notification)
+        DeveloperOptionsWindow.shared.close()
+        DispatchQueue.main.async { NSApp.terminate(nil) }
+    }
+    override func responds(to selector: Selector!) -> Bool { super.responds(to: selector) || original?.responds(to: selector) == true }
+    override func forwardingTarget(for selector: Selector!) -> Any? {
+        if original?.responds(to: selector) == true { return original }
+        return super.forwardingTarget(for: selector)
     }
 }
 
