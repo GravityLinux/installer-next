@@ -22,19 +22,13 @@ cp -R "$root/Resources/fonts" "$output/Contents/Resources/"
 # Clean obsolete resources when rebuilding an existing output bundle.
 rm -f "$output/Contents/Resources/NOTICE"
 rm -rf "$output/Contents/Resources/licenses/asahi-installer"
+rm -rf "$output/Contents/Resources/boot"
 if [ "${PREVIEW:-0}" = 1 ]; then
     /usr/libexec/PlistBuddy -c 'Add :GravityDemo bool true' "$output/Contents/Info.plist"
 else
     logo=${LOGO:-"$root/artwork/logos/icns/GravityLinux_logomark.icns"}
     test -f "$logo"
-    mkdir -p "$output/Contents/Resources/boot" "$output/Contents/Resources/licenses/gravity-artwork"
-    if [ -n "${BOOT_ASSETS_DIR:-}" ]; then
-        test -d "$BOOT_ASSETS_DIR"
-        cp -R "$BOOT_ASSETS_DIR/." "$output/Contents/Resources/boot/"
-    else
-        test -f "${M1N1_STAGE1:?Set BOOT_ASSETS_DIR or M1N1_STAGE1 to qualified boot assets}"
-        cp "$M1N1_STAGE1" "$output/Contents/Resources/boot/m1n1.bin"
-    fi
+    mkdir -p "$output/Contents/Resources/licenses/gravity-artwork"
     cp "$logo" "$output/Contents/Resources/logo.icns"
     cp "$logo" "$output/Contents/Resources/Gravity.icns"
     cp "$root/artwork/LICENSE" "$root/artwork/README.md" "$root/artwork/TRADEMARKS.md" "$output/Contents/Resources/licenses/gravity-artwork/"

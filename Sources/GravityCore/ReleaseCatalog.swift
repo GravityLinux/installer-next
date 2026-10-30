@@ -36,7 +36,7 @@ public enum ReleaseCatalog {
             try require(!template.name.isEmpty, "An installation image is missing its name")
             try require((template.mode != .linux || !template.layout.isEmpty) && template.layout.filter { $0.expand == true }.count <= 1, "Invalid image partition definition")
             if template.mode == .uefi { try require(template.layout.count == 1, "UEFI-only installation requires exactly one ESP") }
-            _ = try board.boot.resource(template.boot_object, in: URL(fileURLWithPath: "/resources"))
+            _ = try board.boot.downloadURL(template.boot_object, repository: repository)
             var total: Int64 = 0
             for part in template.layout {
                 let bytes = try part.bytes, sum = total.addingReportingOverflow(bytes)

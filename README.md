@@ -15,15 +15,16 @@ PREVIEW=1 sh scripts/build-app.sh
 ```
 
 Preview apps always run in demo mode. Real app archives require the Gravity
-artwork submodule and a qualified stage-1 bootloader for the target board:
+artwork submodule:
 
 ```sh
 git submodule update --init artwork
-M1N1_STAGE1=/absolute/path/to/qualified/m1n1.bin ./build.sh
+./build.sh
 ```
 
-`BOOT_ASSETS_DIR` can supply a complete boot-assets directory instead. The
-archive, checksum, version marker and generic bootstrap are written to
+Stage1 is downloaded from the selected CDN during installation or a bootloader
+upgrade; it is not built or bundled with the app. The app archive, checksum,
+version marker and generic bootstrap are written to
 `releases/`. `VERSION` tracks the app version; archive IDs also identify the Git
 revision. No remote publishing or deployment runs as part of this build.
 
@@ -69,6 +70,9 @@ explicitly to test experimental features.
 `INSTALLER_BASE` selects the app-update artifacts. Available OS images and their
 layouts are fetched from `https://cdn.gravitylinux.org/installer/installer_data.json`;
 relative package filenames resolve under `https://cdn.gravitylinux.org/os/`.
+Stage1 resolves under `https://cdn.gravitylinux.org/boot/`, using the image's
+`boot_object` and any directory specified by the board profile. A custom CDN
+also changes that bootloader source.
 `INSTALLER_DATA` and `REPO_BASE` override those two OS sources during bootstrap,
 and the app saves the values for subsequent launches. Direct app launches accept
 `--catalog URL_OR_PATH --repository URL_OR_PATH` for local image testing. Local
@@ -235,6 +239,36 @@ included in the app's copy of that file.
 
 Artwork, the bootloader submodule, and embedded design fonts retain their own
 licenses.
+
+## Publishing stage1
+
+Publish the qualified stage1 and its matching checksum at:
+
+```
+https://cdn.gravitylinux.org/boot/m1n1.bin
+https://cdn.gravitylinux.org/boot/m1n1.bin.sha256
+```
+
+The checksum can be a bare SHA-256 or the output of `shasum -a 256 m1n1.bin`.
+These are separate CDN assets, outside the installer archive. Prepare them from
+an existing qualified binary with:
+
+```sh
+M1N1_STAGE1=/absolute/path/to/qualified/m1n1.bin sh tools/build-stage1.sh
+```
+
+Without `M1N1_STAGE1`, that tool builds the bootloader submodule with the existing
+`RELEASE=1 CHAINLOADING=1 NO_DISPLAY=1` configuration and appends the Gravity logo.
+It writes `releases/boot/m1n1.bin` and its checksum for upload. It does not publish
+anything. Keep the binary and checksum consistent when publishing; a mismatch
+stops before any partition changes. Board-specific paths use
+`/boot/<BoardBootAssets.directory>/<boot_object>` and the corresponding `.sha256`.
+
+Stage1 is fetched only after installation is confirmed, before partition changes,
+then its verified bytes are reused to build `boot.bin`. Bootloader upgrades fetch
+and verify stage1 before changing the installed startup files, preserving the
+existing boot variables. Repair keeps the existing object. 1TR uses the saved
+`boot.bin` offline and never fetches stage1.
 
 ## Defining an OS release
 

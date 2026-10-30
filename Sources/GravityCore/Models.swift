@@ -2,7 +2,7 @@
 import Foundation
 
 public enum InstallStep: String, Codable, CaseIterable, Sendable {
-    case inspecting, metadata, package, ipsw, validateRecovery, decodeRecovery, verifyRecovery
+    case inspecting, metadata, package, stage1, ipsw, validateRecovery, decodeRecovery, verifyRecovery
     case resize, createStub, volumes, systemVolume, dataVolume, preboot, bootability, restoreFirmware, administrators
     case recoveryVolume, compressRecovery, stage2App, partition, format, calibration, wifi, bluetooth, multitouch, kernel, boardFirmware, firmwareArchive
     case systemImage, systemFiles, extras, bootObject, installerData, reducedSecurity, defaultBoot, restart
@@ -12,6 +12,7 @@ public enum InstallStep: String, Codable, CaseIterable, Sendable {
         case .inspecting: return "Checking this Mac"
         case .metadata: return "Loading available software"
         case .package: return "Opening the Gravity Linux package"
+        case .stage1: return "Downloading the startup bootloader"
         case .ipsw: return "Opening Apple restore firmware"
         case .validateRecovery: return "Checking recovery compatibility"
         case .decodeRecovery: return "Decoding recovery"
@@ -60,6 +61,7 @@ public enum InstallStep: String, Codable, CaseIterable, Sendable {
         case .inspecting: return "Checking the model, macOS version, boot environment, and partition layout."
         case .metadata: return "Checking the CDN for available installation images compatible with this Mac."
         case .package: return "Only the needed parts of the software archive are downloaded."
+        case .stage1: return "Fetching stage1 from the selected CDN and checking its SHA-256 before changing partitions."
         case .ipsw: return "Apple restore firmware provides the boot files and recovery environment this Mac needs."
         case .validateRecovery: return "Recovery and the firmware required by this board are checked before any partition changes."
         case .decodeRecovery: return "macOS is decoding the Apple recovery image. This needs at least 4 GiB of temporary free space."

@@ -150,15 +150,15 @@ public actor InstallerEngine {
         try root()
         let lock = try MutationLock(); defer { withExtendedLifetime(lock) {} }
         let power = PowerAssertion(); defer { withExtendedLifetime(power) {} }
-        guard let template = templates[plan.selection.softwareID], let app = configuration.appBundle else { throw InstallerError("Install from the packaged app, with its boot resources") }
+        guard let template = templates[plan.selection.softwareID], let app = configuration.appBundle else { throw InstallerError("Install from the packaged app") }
         try require(fm.fileExists(atPath: app.appending("Contents/MacOS/gravity-installer").path), "The offline recovery app is missing")
         let first = try scan(); try require(first.fingerprint == fingerprint, "Disk layout changed after review; review a new plan")
         try require(first.system.bootMode == "macOS", "Begin a new installation from macOS. Use --stage2 in paired recovery to finish.")
         try validate(credentials, first.current)
+        let stage1 = try Stage1Download.load(boot: first.board.boot, name: template.boot_object, repository: configuration.repositoryURL, events: events)
         events(InstallEvent(.package))
         let archive = try template.package.map { try ZIPArchive(resolvePackage($0), verifyCRC: !configuration.bypassImageChecks, cacheDirectory: configuration.downloadCache) }
-        // Resolve required boot assets and the image inventory before any mutation.
-        _ = try Data(contentsOf: first.board.boot.resource(template.boot_object, in: configuration.resourceDirectory))
+        // Resolve remaining resources and the image inventory before any mutation.
         _ = try Data(contentsOf: configuration.resourceDirectory.appending("logo.icns"))
         for partition in template.layout {
             if let image = partition.image { guard let archive else { throw InstallerError("Release image has no package") }; _ = try archive.entry(image) }
@@ -245,7 +245,7 @@ public actor InstallerEngine {
         if let next = template.next_object, template.mode != .bootloader {
             guard let efi else { throw InstallerError("Chainloading requires an EFI partition") }; variables.append("chainload=\(efi.uuid.lowercased());\(next)")
         }
-        try write(BootObject.build(Data(contentsOf: fresh.board.boot.resource(template.boot_object, in: configuration.resourceDirectory)), variables: variables, alignment: fresh.board.boot.registration.alignment), to: os.resources.appending("boot.bin"))
+        try write(BootObject.build(stage1, variables: variables, alignment: fresh.board.boot.registration.alignment), to: os.resources.appending("boot.bin"))
         var finishedRecord = record; finishedRecord.ready = true
         for dest in idata {
             try stub.collectInstallerData(dest)
@@ -400,12 +400,18 @@ extension InstallerEngine {
             _ = try scan.disk.action(["apfs", "resizeContainer", macOS.name, "0"])
             return
         }
+        let boot = os.resources.appending("boot.bin")
+        let existingBoot = try Data(contentsOf: boot)
+        let upgradedBoot: Data?
+        if plan.operation == "upgrade" {
+            let vars = try BootObject.variables(existingBoot)
+            let stage1 = try Stage1Download.load(boot: scan.board.boot, name: scan.board.boot.stage1, repository: configuration.repositoryURL, events: events)
+            upgradedBoot = try BootObject.build(stage1, variables: vars, alignment: scan.board.boot.registration.alignment)
+        } else { upgradedBoot = nil }
         events(InstallEvent(.repair)); _ = try commands.run("/sbin/mount", ["-u", "-w", os.system.path], input: nil)
         let source = scan.current.preboot.appending("\(scan.current.vgid)/var/db/AdminUserRecoveryInfo.plist"), dest = os.preboot.appending("\(os.vgid)/var/db/AdminUserRecoveryInfo.plist")
         if fm.fileExists(atPath: dest.path) { _ = try commands.run("/usr/bin/chflags", ["noschg", dest.path], input: nil) }
         try copy(source, dest); _ = try commands.run("/usr/bin/chflags", ["schg", dest.path], input: nil)
-        let boot = os.resources.appending("boot.bin")
-        let existingBoot = try Data(contentsOf: boot)
         let recordURL = os.resources.appending("stage2.json")
         var record: Stage2Record
         if let saved = try? JSONDecoder().decode(Stage2Record.self, from: Data(contentsOf: recordURL)) {
@@ -421,10 +427,7 @@ extension InstallerEngine {
             record = Stage2Record(version: 1, vgid: os.vgid, prebootUUID: os.prebootUUID, name: os.label, macOSPartitionUUID: scan.current.partition.uuid, partitions: [], ready: true, complete: false)
             record.managedLayout = false
         }
-        if plan.operation == "upgrade" {
-            let vars = try BootObject.variables(existingBoot)
-            try write(BootObject.build(Data(contentsOf: scan.board.boot.resource(scan.board.boot.stage1, in: configuration.resourceDirectory)), variables: vars, alignment: scan.board.boot.registration.alignment), to: boot)
-        }
+        if let upgradedBoot { try write(upgradedBoot, to: boot) }
         record.complete = false
         record.developerMode = configuration.developer; record.boardProfileID = scan.board.id; record.hardware = scan.system.hardware
         try write(JSONEncoder().encode(record), to: recordURL)

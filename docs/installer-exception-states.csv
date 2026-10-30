@@ -22,7 +22,9 @@ credentials.rejected,Credentials,Generic alert; returns to review,Password is in
 credentials.privilege-denied,Credentials,Generic alert; returns to review,macOS refuses to start the privileged session,unchanged,Use logged-in administrator; retry; cancel,No separate Authorize screen
 credentials.cancelled,Credentials,Sheet dismissed,User cancels the password sheet,unchanged,Remain at Review or Finalize,No work starts and password field clears
 credentials.timeout,Credentials,Generic alert,Privileged-session handshake times out,unchanged,Retry; cancel,Keep review intact
-preflight.boot-assets-missing,Preflight,Generic alert; returns to review,Compiled boot object or branding resource is absent,unchanged,Reinstall/update installer; copy details,Installer packaging failure
+preflight.boot-assets-missing,Preflight,Generic alert; returns to review,Packaged app or branding resource is absent,unchanged,Reinstall/update installer; copy details,Installer packaging failure
+preflight.stage1-unavailable,Install or bootloader upgrade,Generic alert; returns to review,CDN stage1 or SHA-256 sidecar cannot be downloaded,unchanged,Check CDN/network; retry; copy details,Needs design pass: stage1 is fetched after confirmation before partition or startup-file changes
+preflight.stage1-invalid,Install or bootloader upgrade,Generic alert; returns to review,Stage1 checksum is missing/malformed/mismatched or binary size is invalid,unchanged,Fix published CDN assets; retry; copy details,Needs design pass: checksum verification cannot be bypassed by developer image options
 preflight.temporary-space,Preflight,Generic alert; returns to review,Insufficient temporary space for recovery validation,unchanged,Free temporary space; retry,Different from space reserved for Linux
 download.unavailable,Downloads,Generic alert before changes,"Offline, DNS, TLS, server, timeout or retry failure",unchanged,Retry; change network; cancel,Download progress and retry variant needed
 download.integrity,Downloads,Generic alert before changes,"Checksum, CRC or HTTP-range validation fails",unchanged,Retry verified download; copy details,Never offer bypass

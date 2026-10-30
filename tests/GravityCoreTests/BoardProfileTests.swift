@@ -63,7 +63,7 @@ private func fixtureBoard(state: FixtureFirmwareState = FixtureFirmwareState(), 
     let release = SoftwareTemplate(name: "Test Linux", mode: .linux, bootObject: "fixture.bin",
         partitions: [PartitionTemplate(name: "Linux", type: "Linux", size: "5GB", expand: true)])
     #expect(try release.software(id: "fixture", storage: board.storage).minimumBytes == 36_000_000_000)
-    #expect(try board.boot.resource(board.boot.stage1, in: URL(fileURLWithPath: "/resources")).path == "/resources/boot/fixture/assets/fixture.bin")
+    #expect(try board.boot.downloadURL(board.boot.stage1, repository: URL(string: "https://cdn.example.test")!).absoluteString == "https://cdn.example.test/boot/fixture/assets/fixture.bin")
     #expect(try BootObject.build(Data("boot".utf8), variables: [], alignment: board.boot.registration.alignment).count == 16384)
 }
 @Test func restoreIdentitySelectionUsesBoardChipAndDevice() throws {

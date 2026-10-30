@@ -56,11 +56,16 @@ public struct BoardBootAssets: Sendable {
     public init(directory: String = "", stage1: String = "m1n1.bin", registration: BootRegistration = BootRegistration()) {
         self.directory = directory; self.stage1 = stage1; self.registration = registration
     }
-    func resource(_ name: String, in resources: URL) throws -> URL {
-        for component in [directory, name] {
-            try require(!component.hasPrefix("/") && !component.split(separator: "/").contains(".."), "Invalid board boot asset path")
+    func downloadURL(_ name: String, repository: URL) throws -> URL {
+        try ReleaseCatalog.validateSource(repository)
+        for component in [directory, name] where !component.isEmpty {
+            try require(component.split(separator: "/", omittingEmptySubsequences: false).allSatisfy { part in
+                !part.isEmpty && part != "." && part != ".." && part.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "._-".contains($0)) }
+            }, "Invalid board boot asset path")
         }
-        return resources.appending("boot").appending(directory).appending(name)
+        try require(!name.isEmpty, "Missing board boot asset name")
+        let path = [directory, name].filter { !$0.isEmpty }.joined(separator: "/")
+        return repository.appendingPathComponent("boot", isDirectory: true).appendingPathComponent(path)
     }
 }
 
@@ -154,6 +159,6 @@ public struct BoardProfile: Sendable {
         if case let .aea(encrypted, key) = restore.encoding {
             try require(encrypted.count == 64 && encrypted.allSatisfy { "0123456789abcdef".contains($0) } && !key.isEmpty, "Invalid AEA qualification for \(id)")
         }
-        _ = try boot.resource(boot.stage1, in: URL(fileURLWithPath: "/resources"))
+        _ = try boot.downloadURL(boot.stage1, repository: ReleaseCatalog.productionRepository)
     }
 }
