@@ -41,7 +41,16 @@ import GravityCore
                             }
                             HStack(spacing: 12) {
                                 Text("Release channel").font(InstallerTheme.font(13, .medium))
-                                Picker("", selection: $draft.options.releaseChannel) { Text("Stable").tag("stable"); Text("Nightly").tag("nightly") }.labelsHidden().frame(width: 110)
+                                Menu {
+                                    Button("Stable") { draft.options.releaseChannel = "stable" }
+                                    Button("Nightly") { draft.options.releaseChannel = "nightly" }
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Text(options.releaseChannel == "nightly" ? "Nightly" : "Stable").font(InstallerTheme.font(13))
+                                        Image(systemName: "chevron.up.chevron.down").font(.system(size: 10))
+                                    }.padding(.horizontal, 8).frame(height: 28).background(.white, in: RoundedRectangle(cornerRadius: 6))
+                                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(InstallerTheme.border, lineWidth: 1))
+                                }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("Release channel")
                                 Spacer()
                             }
                             VStack(alignment: .leading, spacing: 14) {

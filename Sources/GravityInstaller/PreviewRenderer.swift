@@ -52,7 +52,7 @@ import GravityCore
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = host; window.makeKeyAndOrderFront(nil); host.layoutSubtreeIfNeeded()
         try await Task.sleep(nanoseconds: 150_000_000)
-        window.displayIfNeeded()
+        window.makeFirstResponder(nil); window.displayIfNeeded()
         guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { throw InstallerError("Could not render the preview") }
         host.cacheDisplay(in: host.bounds, to: bitmap)
         guard let data = bitmap.representation(using: .png, properties: [:]) else { throw InstallerError("Could not encode the preview") }
