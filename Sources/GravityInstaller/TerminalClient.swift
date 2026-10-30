@@ -45,6 +45,7 @@ enum TerminalClient {
       gravity-installer --handoff-bundle DEST [--ipsw URL_OR_PATH]
       gravity-installer --fwextract SOURCE DEST  Rebuild saved firmware (optional: --board PROFILE_ID)
     Options: --resources PATH --developer|--no-developer
+      --catalog URL_OR_PATH --repository URL_OR_PATH  Override CDN image sources
     Stage2 is automatic when launched from the installed recovery app.
     """
     static func prompt(_ text: String, default fallback: String? = nil) throws -> String {

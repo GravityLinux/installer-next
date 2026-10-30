@@ -26,6 +26,8 @@ struct LaunchOptions {
         configuration.demo = Bundle.main.object(forInfoDictionaryKey: "GravityDemo") as? Bool == true
         if let bundle, let distribution = try InstallerDistribution.read(from: bundle) {
             configuration.developer = distribution.channel != "stable"
+            if let url = distribution.catalogURL { configuration.catalogURL = url }
+            if let url = distribution.repositoryURL { configuration.repositoryURL = url }
         }
         var i = 0
         func value() throws -> String {
@@ -41,6 +43,11 @@ struct LaunchOptions {
             case "--developer": configuration.developer = true
             case "--no-developer": configuration.developer = false
             case "--resources": configuration.resourceDirectory = URL(fileURLWithPath: try value()).standardizedFileURL
+            case "--catalog", "--repository":
+                let option = arguments[i], path = try value()
+                let url = path.contains("://") ? URL(string: path) : URL(fileURLWithPath: path)
+                guard let url else { throw InstallerError("Invalid image metadata source") }
+                if option == "--catalog" { configuration.catalogURL = url } else { configuration.repositoryURL = url }
             case "--stage2":
                 if i + 1 < arguments.count && !arguments[i+1].hasPrefix("--") { configuration.stage2URL = URL(fileURLWithPath: try value()).standardizedFileURL }
                 else if configuration.stage2URL == nil && !configuration.demo { throw InstallerError("--stage2 requires the installed stage2.json path") }
@@ -86,7 +93,8 @@ struct LaunchOptions {
                       let channel = options.updateChannel, let base = options.installerBase, let latest = options.latestURL else {
                     throw InstallerError("App deployment requires a packaged app, release ID, channel, and update endpoints")
                 }
-                let distribution = InstallerDistribution(installationPath: destination.path, channel: channel, installerBaseURL: base, latestURL: latest)
+                let distribution = InstallerDistribution(installationPath: destination.path, channel: channel, installerBaseURL: base, latestURL: latest,
+                    catalogURL: options.configuration.catalogURL, repositoryURL: options.configuration.repositoryURL)
                 let result = try InstallerApplication.install(source: source, destination: destination, expectedRelease: expectedRelease, distribution: distribution, force: options.forceDeployment)
                 FileHandle.standardOutput.write(try JSONEncoder().encode(result) + Data([10])); return
             }

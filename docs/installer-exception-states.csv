@@ -8,7 +8,8 @@ startup.wrong-console-user,Startup,Startup failure placeholder,Console login is 
 storage.unsupported-layout,Storage,Startup failure placeholder,Internal disk or GUID/APFS layout is not supported,unchanged,Quit; copy details,Show supported layout requirements
 storage.insufficient-space,Storage,Inline storage message,No target can fit the selected release plus macOS reserve,unchanged,Free space; choose another target; retry,Current inline design needs review
 storage.locked-or-unmounted,Storage,Not yet surfaced separately,Other APFS groups cannot be inspected read-only,unchanged,Unlock/mount in macOS; retry,Do not silently present a destructive option
-software.no-release,Software,Empty selection; Continue disabled,No compiled release is available for this board/mode,unchanged,Update installer; developer options; quit,No downloadable catalog/configuration error
+software.no-release,Software,Software selection,No compatible CDN image is available for this board/mode,unchanged,Check again; developer options; choose Bootloader only; quit,Distinguish an empty image list from an unreachable CDN
+software.metadata-unavailable,Software,Startup failure placeholder,CDN image listing is unavailable or malformed,unchanged,Retry; check network; copy details; quit,Board support remains compiled; do not imply unsupported hardware
 review.invalid-input,Review,Generic alert,"Invalid name, size, target or software selection",unchanged,Correct field; return to selection,Prefer field-specific feedback
 review.expired-or-changed,Review,Generic alert,Plan expired or layout/release differs from reviewed plan,unchanged,Reinspect; review again,Never auto-approve the changed plan
 credentials.empty,Credentials,Disabled Continue button,Username or password is empty,unchanged,Complete fields; cancel,One sheet per boot stage

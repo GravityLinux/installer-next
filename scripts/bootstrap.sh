@@ -13,6 +13,8 @@ if true; then
 
     export INSTALLER_BASE=${INSTALLER_BASE:-}
     export VERSION_FLAG=${VERSION_FLAG:-$INSTALLER_BASE/latest}
+    export INSTALLER_DATA=${INSTALLER_DATA:-https://cdn.gravitylinux.org/installer/installer_data.json}
+    export REPO_BASE=${REPO_BASE:-https://cdn.gravitylinux.org}
 
     installer_channel=${INSTALLER_CHANNEL:-stable}
     installer_applications=${GRAVITY_APPLICATIONS_DIR:-/Applications}
@@ -80,11 +82,11 @@ if true; then
     if [ "$installer_force" = 1 ]; then installer_deploy_flag=--force-deploy; else installer_deploy_flag=--gui; fi
     if [ "$(id -u)" = 0 ] || [ -w "$installer_applications" ]; then
         "$installer_source" --deploy-app "$installer_app" --expected-release "$installer_version" --update-channel "$installer_channel" \
-            --installer-base "$INSTALLER_BASE" --latest-url "$VERSION_FLAG" \
+            --installer-base "$INSTALLER_BASE" --latest-url "$VERSION_FLAG" --catalog "$INSTALLER_DATA" --repository "$REPO_BASE" \
             "$installer_deploy_flag" > deployment.json
     else
         sudo "$installer_source" --deploy-app "$installer_app" --expected-release "$installer_version" --update-channel "$installer_channel" \
-            --installer-base "$INSTALLER_BASE" --latest-url "$VERSION_FLAG" \
+            --installer-base "$INSTALLER_BASE" --latest-url "$VERSION_FLAG" --catalog "$INSTALLER_DATA" --repository "$REPO_BASE" \
             "$installer_deploy_flag" > deployment.json
     fi
     installer_status=$(/usr/bin/plutil -extract status raw -o - deployment.json)
@@ -95,6 +97,6 @@ if true; then
     trap - EXIT HUP INT TERM
     if [ "$installer_update_only" = 1 ]; then exit 0; fi
     # Future launches read the saved channel/endpoints from the installed app.
-    unset INSTALLER_BASE VERSION_FLAG
+    unset INSTALLER_BASE VERSION_FLAG INSTALLER_DATA REPO_BASE
     exec caffeinate -dis "$installer_app/Contents/Resources/launch.sh" "$@"
 fi

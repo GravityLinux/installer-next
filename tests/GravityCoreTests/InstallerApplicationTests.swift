@@ -34,13 +34,18 @@ private func distribution(_ app: URL, channel: String = "stable") -> InstallerDi
     let installedLock = try InstallerApplicationLock.acquireIfInstalled(app: destination)
     let lock = try #require(installedLock); withExtendedLifetime(lock) {}
 }
-@Test func installerCanPersistWithoutHardcodedOSDownloadEndpoints() throws {
+@Test func installerPersistsSeparateAppAndImageSources() throws {
     let temp = try TemporaryDirectory(), source = try appFixture(temp.url.appending("download")), destination = temp.url.appending("Applications/Gravity Installer.app")
     let distribution = InstallerDistribution(installationPath: destination.path, channel: "local",
-        installerBaseURL: URL(string: "http://localhost:5050")!, latestURL: URL(string: "http://localhost:5050/latest")!)
+        installerBaseURL: URL(string: "http://localhost:5050")!, latestURL: URL(string: "http://localhost:5050/latest")!,
+        catalogURL: URL(string: "http://localhost:6060/images.json")!, repositoryURL: URL(string: "http://localhost:6060")!)
     _ = try InstallerApplication.install(source: source, destination: destination, expectedRelease: "release-1", distribution: distribution, commands: ApplicationCommands())
     let saved = try InstallerDistribution.read(from: destination)
     #expect(saved == distribution)
+    var legacy = try JSONSerialization.jsonObject(with: JSONEncoder().encode(distribution)) as! [String: Any]
+    legacy.removeValue(forKey: "catalogURL"); legacy.removeValue(forKey: "repositoryURL")
+    let migrated = try JSONDecoder().decode(InstallerDistribution.self, from: JSONSerialization.data(withJSONObject: legacy))
+    #expect(migrated.catalogURL == nil && migrated.repositoryURL == nil && migrated.installerBaseURL == distribution.installerBaseURL)
 }
 @Test func executableSignatureSurvivesDeploymentAndRecoveryResourcesButRejectsTampering() throws {
     let temp = try TemporaryDirectory(), source = try appFixture(temp.url.appending("download")), destination = temp.url.appending("Applications/Gravity Installer.app")

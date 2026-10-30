@@ -58,7 +58,7 @@ public enum InstallStep: String, Codable, CaseIterable, Sendable {
     public var help: String {
         switch self {
         case .inspecting: return "Checking the model, macOS version, boot environment, and partition layout."
-        case .metadata: return "Loading the release definitions compiled into this installer for your board."
+        case .metadata: return "Checking the CDN for available installation images compatible with this Mac."
         case .package: return "Only the needed parts of the software archive are downloaded."
         case .ipsw: return "Apple restore firmware provides the boot files and recovery environment this Mac needs."
         case .validateRecovery: return "Recovery and the firmware required by this board are checked before any partition changes."
@@ -180,12 +180,16 @@ public struct Credentials: Sendable {
 }
 public struct EngineConfiguration: Sendable {
     public var resourceDirectory: URL
+    public var catalogURL: URL
+    public var repositoryURL: URL
     public var appBundle: URL?
     public var stage2URL: URL?
     public var developer = false
     public var demo = false
-    public init(resourceDirectory: URL, appBundle: URL? = nil, stage2URL: URL? = nil, demo: Bool = false) {
+    public init(resourceDirectory: URL, appBundle: URL? = nil, stage2URL: URL? = nil, demo: Bool = false,
+                catalogURL: URL = ReleaseCatalog.productionURL, repositoryURL: URL = ReleaseCatalog.productionRepository) {
         self.resourceDirectory = resourceDirectory; self.appBundle = appBundle; self.stage2URL = stage2URL; self.demo = demo
+        self.catalogURL = catalogURL; self.repositoryURL = repositoryURL
     }
 }
 public enum GuideLinks {
@@ -193,7 +197,7 @@ public enum GuideLinks {
     public static let recovery = URL(string: "https://gravitylinux.org/finish")!
     public static let safety = URL(string: "https://gravitylinux.org/docs/installer-safety")!
 }
-public struct PartitionTemplate: Decodable, Sendable {
+public struct PartitionTemplate: Codable, Sendable {
     let name: String, type: String, size: String
     let format: String?, image: String?, source: String?
     let expand: Bool?, copy_firmware: Bool?, copy_installer_data: Bool?, volume_id: String?
@@ -204,19 +208,49 @@ public struct PartitionTemplate: Decodable, Sendable {
     }
     var bytes: Int64 { get throws { alignUp(try parseSize(size)) } }
 }
-public struct SoftwareTemplate: Sendable {
+public struct SoftwareTemplate: Codable, Sendable {
     let name: String, default_os_name: String, boot_object: String
     let package: String?, icon: String?, next_object: String?
     let expert: Bool
     let extras: [String]?
     let partitions: [PartitionTemplate]
     let mode: InstallationMode
+    let supported_boards: [String]?, supported_devices: [String]?, supported_fw: [String]?
     public init(name: String, mode: InstallationMode, bootObject: String = "m1n1.bin", package: URL? = nil,
                 partitions: [PartitionTemplate] = [], defaultOSName: String = "Gravity Linux", icon: String? = nil,
                 nextObject: String? = nil, developer: Bool = false, extras: [URL] = []) {
         self.name = name; self.mode = mode; boot_object = bootObject; self.package = package?.absoluteString
         self.partitions = partitions; default_os_name = defaultOSName; self.icon = icon; next_object = nextObject
         expert = developer; self.extras = extras.map(\.absoluteString)
+        supported_boards = nil; supported_devices = nil; supported_fw = nil
+    }
+    enum CodingKeys: String, CodingKey {
+        case name, default_os_name, boot_object, package, icon, next_object, expert, extras, partitions
+        case mode = "install_mode"
+        case supported_boards, supported_devices, supported_fw
+    }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        name = try values.decode(String.self, forKey: .name)
+        default_os_name = try values.decodeIfPresent(String.self, forKey: .default_os_name) ?? "Gravity Linux"
+        boot_object = try values.decodeIfPresent(String.self, forKey: .boot_object) ?? "m1n1.bin"
+        package = try values.decodeIfPresent(String.self, forKey: .package)
+        icon = try values.decodeIfPresent(String.self, forKey: .icon)
+        next_object = try values.decodeIfPresent(String.self, forKey: .next_object)
+        expert = try values.decodeIfPresent(Bool.self, forKey: .expert) ?? false
+        extras = try values.decodeIfPresent([String].self, forKey: .extras)
+        partitions = try values.decodeIfPresent([PartitionTemplate].self, forKey: .partitions) ?? []
+        mode = try values.decodeIfPresent(InstallationMode.self, forKey: .mode) ?? .linux
+        supported_boards = try values.decodeIfPresent([String].self, forKey: .supported_boards)
+        supported_devices = try values.decodeIfPresent([String].self, forKey: .supported_devices)
+        supported_fw = try values.decodeIfPresent([String].self, forKey: .supported_fw)
+    }
+    func supports(_ board: BoardProfile) -> Bool {
+        if let ids = supported_boards, !ids.contains(board.id) { return false }
+        if let devices = supported_devices, !devices.contains(board.deviceClass) { return false }
+        if supported_boards == nil && supported_devices == nil && !board.acceptsUnscopedImages { return false }
+        if let versions = supported_fw, !versions.contains(board.restore.version) { return false }
+        return board.installationModes.contains(mode)
     }
     public static let bootloaderOnly = SoftwareTemplate(name: "Bootloader only", mode: .bootloader)
     var layout: [PartitionTemplate] {

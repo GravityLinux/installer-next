@@ -12,5 +12,5 @@ enum J773g {
             notes: "Boots and runs. Not ready to be a daily driver yet.",
             powerButtonHelp: "On your Mac mini, the power button is on the bottom, near the back-left corner.",
             postInstallNote: "Good to know in this alpha: sleep doesn’t work yet, so shut down when you’re done."),
-        releases: [.bootloaderOnly])
+        acceptsUnscopedImages: true)
 }

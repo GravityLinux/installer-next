@@ -58,12 +58,10 @@ private func fixtureBoard(state: FixtureFirmwareState = FixtureFirmwareState(), 
     #expect(try disjoint.resolve(HardwareIdentity(deviceClass: fixtureHardware.deviceClass, chipID: 0xf00d, boardID: 0x13)).id == "another-revision")
     #expect(Set(BoardRegistry.builtIn.profiles.map(\.id)) == ["j773g", "j700"])
 }
-@Test func compiledReleasesAndStoragePolicyComeFromBoard() throws {
+@Test func storagePolicyComesFromBoard() throws {
     let board = fixtureBoard()
     let release = SoftwareTemplate(name: "Test Linux", mode: .linux, bootObject: "fixture.bin",
         partitions: [PartitionTemplate(name: "Linux", type: "Linux", size: "5GB", expand: true)])
-    #expect(board.releases.isEmpty)
-    #expect(BoardRegistry.builtIn.profiles.allSatisfy { !$0.releases.isEmpty })
     #expect(try release.software(id: "fixture", storage: board.storage).minimumBytes == 36_000_000_000)
     #expect(try board.boot.resource(board.boot.stage1, in: URL(fileURLWithPath: "/resources")).path == "/resources/boot/fixture/assets/fixture.bin")
     #expect(try BootObject.build(Data("boot".utf8), variables: [], alignment: board.boot.registration.alignment).count == 16384)

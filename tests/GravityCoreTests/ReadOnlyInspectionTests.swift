@@ -59,8 +59,9 @@ private final class ReadOnlyInspectionCommands: CommandRunning, @unchecked Senda
     try writePlist(["testadmin": [:]], temp.url.appending("Preboot/\(commands.group)/var/db/AdminUserRecoveryInfo.plist"))
     let profile = BoardProfile(id: "testreadonly", deviceClass: "testreadonlyap", chipID: 0xf001, minimumMacOS: "1.0",
         restore: RestoreProfile(version: "1.0", url: URL(fileURLWithPath: "/unused.ipsw"), member: "unused.dmg", decodedSHA256: String(repeating: "0", count: 64), encoding: .dmg),
-        firmwareMachine: "testreadonly", firmware: UnusedFirmware(), presentation: BoardPresentation(status: "Test", notes: "", powerButtonHelp: ""), releases: [.bootloaderOnly])
-    let engine = InstallerEngine(configuration: EngineConfiguration(resourceDirectory: temp.url), commands: commands, boards: try BoardRegistry(profiles: [profile]))
+        firmwareMachine: "testreadonly", firmware: UnusedFirmware(), presentation: BoardPresentation(status: "Test", notes: "", powerButtonHelp: ""))
+    let catalog = temp.url.appending("images.json"); try write(Data("{\"os_list\":[]}".utf8), to: catalog)
+    let engine = InstallerEngine(configuration: EngineConfiguration(resourceDirectory: temp.url, catalogURL: catalog), commands: commands, boards: try BoardRegistry(profiles: [profile]))
     let info = try await engine.inspect(), target = try #require(info.targets.first)
     #expect(info.administrator == "testadmin" && info.software.count == 1)
     let plan = try await engine.plan(InstallSelection(targetID: target.id, softwareID: info.software[0].id, bytes: 5_000_000_000))

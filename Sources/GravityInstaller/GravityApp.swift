@@ -268,7 +268,7 @@ private let hairline = Color(red: 0.824, green: 0.824, blue: 0.843)
             Toggle("Enable developer options", isOn: $model.developer)
             Text("Enable experimental board profiles and software for testing Gravity Linux.").foregroundStyle(muted)
             if model.developer {
-                Text("Experimental releases are compiled into this installer. Hardware checks and recovery verification always apply.").font(.caption).foregroundStyle(muted)
+                Text("Experimental images are listed when available from the CDN. Hardware checks and recovery verification always apply.").font(.caption).foregroundStyle(muted)
             }
             HStack { Spacer(); pill("Done", primary: true) { Task { await model.applyDeveloperOptions() } } }
         }.padding(28).frame(width: 470).preferredColorScheme(.light)

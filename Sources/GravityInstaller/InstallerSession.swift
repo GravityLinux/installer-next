@@ -82,6 +82,7 @@ private final class PrivilegedProcess {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
         var arguments = ["-S", "-k", "-p", "", "--", CommandLine.arguments[0], "--api", "--resources", configuration.resourceDirectory.path]
         arguments.append(configuration.developer ? "--developer" : "--no-developer")
+        arguments += ["--catalog", configuration.catalogURL.absoluteString, "--repository", configuration.repositoryURL.absoluteString]
         if let stage2 = configuration.stage2URL { arguments += ["--stage2", stage2.path] }
         process.arguments = arguments; process.standardInput = input; process.standardOutput = output; process.standardError = errors
         try process.run()

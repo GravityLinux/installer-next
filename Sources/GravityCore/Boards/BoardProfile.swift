@@ -117,20 +117,22 @@ public struct BoardProfile: Sendable {
     public let presentation: BoardPresentation
     public let installationModes: Set<InstallationMode>
     public let availability: BoardAvailability
-    public let releases: [SoftwareTemplate]
+    /// Compatibility with existing image metadata that predates board selectors.
+    /// New boards require an explicit supported_boards/supported_devices match.
+    public let acceptsUnscopedImages: Bool
     public init(id: String, deviceClass: String, chipID: Int64, boardIDs: Set<Int64>? = nil,
                 minimumMacOS: String, restore: RestoreProfile, firmwareMachine: String,
                 firmware: any BoardFirmwareLoading, boot: BoardBootAssets = BoardBootAssets(),
                 storage: BoardStoragePolicy = BoardStoragePolicy(), presentation: BoardPresentation,
                 installationModes: Set<InstallationMode> = [.linux, .uefi, .bootloader],
-                availability: BoardAvailability = .standard, releases: [SoftwareTemplate] = []) {
+                availability: BoardAvailability = .standard, acceptsUnscopedImages: Bool = false) {
         self.id = id; self.deviceClass = deviceClass.lowercased(); self.chipID = chipID; self.boardIDs = boardIDs
         self.minimumMacOS = minimumMacOS; self.restore = restore; self.firmwareMachine = firmwareMachine
         self.firmware = firmware; self.boot = boot; self.storage = storage
         var presentation = presentation; presentation.productNumber = id; self.presentation = presentation
         self.installationModes = installationModes
         self.availability = availability
-        self.releases = releases
+        self.acceptsUnscopedImages = acceptsUnscopedImages
     }
     public func matches(_ hardware: HardwareIdentity) -> Bool {
         hardware.deviceClass == deviceClass && hardware.chipID == chipID && (boardIDs?.contains(hardware.boardID) ?? true)

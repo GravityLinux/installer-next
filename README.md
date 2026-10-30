@@ -37,9 +37,9 @@ releases/
   installer-<release>.tar.gz.sha256
 ```
 
-OS releases are compiled into each board profile. If a compiled release uses
-remote OS archives, their host must support HEAD and HTTP byte ranges. One local
-server option on macOS is:
+Available OS images are queried live from the Gravity CDN. Image archive hosts
+must support HEAD and HTTP byte ranges. One local app-artifact server option on
+macOS is:
 
 ```sh
 ruby -run -e httpd -- --bind-address=127.0.0.1 --port=5050 ./releases
@@ -65,11 +65,18 @@ installed version. The bootstrap saves its download configuration in the app;
 later launches do not need the server's temporary files. The development channel
 enables developer-only boards such as j700.
 
-`INSTALLER_BASE` selects the app-update artifacts only. OS image URLs, layouts,
-release choices and supported boards are compiled into the installer; there is
-no remote catalog or runtime firmware/plugin loader. Rebuild and version the
-installer whenever board support or an OS release definition changes. Local
+`INSTALLER_BASE` selects the app-update artifacts. Available OS images and their
+layouts are fetched from `https://cdn.gravitylinux.org/installer/installer_data.json`;
+relative package filenames resolve under `https://cdn.gravitylinux.org/os/`.
+`INSTALLER_DATA` and `REPO_BASE` override those two OS sources during bootstrap,
+and the app saves the values for subsequent launches. Direct app launches accept
+`--catalog URL_OR_PATH --repository URL_OR_PATH` for local image testing. Local
 HTTP is allowed on loopback; use an SSH tunnel or HTTPS for another computer.
+
+Hardware detection, developer gates, firmware loaders, restore qualification and
+storage constraints are compiled into the installer. Adding board support needs
+a new installer version; publishing a compatible image candidate needs only a
+CDN metadata/image update. The CDN does not supply executable board plugins.
 
 Only Gravity installer/OS artifacts belong on this server. Apple restore images
 are downloaded directly from Apple. Per-device firmware and calibration are
@@ -115,7 +122,7 @@ To add a board, add **one or two files**:
 1. `Sources/GravityCore/Boards/Profiles/J<number>.swift`, defining
    `enum J<number>` with `static let profile: BoardProfile`. Set the lowercase
    product number as `id`, exact hardware match, restore pins, boot assets,
-   presentation details, compiled `releases`, and any storage policy in that profile. Use
+   presentation details and any storage policy in that profile. Use
    `availability: .developer` until support is ready for normal users.
 2. If its firmware needs different handling, add `Boards/J<number>Firmware.swift`
    implementing `BoardFirmwareLoading`. Existing loaders can be reused.
@@ -124,7 +131,7 @@ The SwiftPM `BoardDiscovery` plugin automatically registers every profile file.
 There is no central board list or per-board change to the package manifest,
 installer engine, GUI or TUI. Presentation gets its product number directly from
 the profile ID. Shared restore definitions can be reused or a new restore can be
-declared in the board's profile file. Compiled release definitions and bundled boot assets
+declared in the board's profile file. CDN image metadata and bundled boot assets
 still need to match the board, and hardware support needs device qualification.
 Developer selection is saved for recovery finalization, so the second stage
 retains the choice made when installing.
@@ -162,7 +169,7 @@ This command does not partition disks or register a boot object. It produces
 metadata. Success requires an archive-only rebuild to reproduce all three
 firmware outputs byte for byte. Do not confuse this with qualification of
 native Linux boot, OS installation, suspend or all wireless operating modes.
-Board-specific OS choices live in `BoardProfile.releases`.
+OS choices come from the live CDN image metadata.
 
 ## Legal
 
@@ -176,13 +183,24 @@ licenses.
 
 ## Defining an OS release
 
-Add a typed `SoftwareTemplate` to the board's `releases` array. It specifies an
-explicit installation mode, absolute package URL, boot object, partitions and
-optional next-stage loader. `PartitionTemplate` specifies image/archive members,
-size, expansion and firmware/installer-data copy policies. The engine validates
-the compiled layout before showing a plan. New definitions require a new build.
+Publish an entry in `os_list` in
+[GravityLinux/installer-data](https://github.com/GravityLinux/installer-data),
+then publish that JSON to `/installer/installer_data.json` on the CDN. GitHub
+changes alone do not publish CDN objects. The existing format includes `name`,
+`package`, `boot_object`, `next_object`, `supported_fw`, `partitions` and optional
+`expert`. Set `install_mode` to `linux`, `uefi` or `bootloader` (omitting it means
+`linux`). Relative packages resolve under the repository's `/os/`; absolute
+HTTPS package URLs are also supported.
 
-The current profiles contain `.bootloaderOnly`, which uses the included stage-1
-binary and leaves the remaining selected space free. Linux and UEFI image
-choices must be added with their actual, board-qualified artifacts; no fake
-image URLs or placeholder Linux installations are offered.
+New images should set `supported_boards` to product numbers such as `["j700"]`,
+or use `supported_devices` for exact device classes. All supplied selectors and
+firmware constraints must match. Existing unscoped metadata is accepted only by
+the original j773g profile, via its `acceptsUnscopedImages` compatibility setting.
+It is never assumed compatible with j700 or another newly added board.
+
+The installer validates image layouts before Review. Candidate IDs cover the
+complete metadata and repository URL, so a changed image or layout requires a
+new review when the privileged process checks the CDN again. Maintenance and
+offline 1TR finalization do not depend on a live image listing. The generic
+Bootloader only choice uses the bundled stage-1 binary and leaves the remaining
+selected space free.

@@ -50,19 +50,10 @@ public actor InstallerEngine {
     }
     private func loadReleases(for board: BoardProfile) throws {
         templates = [:]
-        for (index, template) in board.releases.enumerated() {
-            if template.expert == true && !configuration.developer { continue }
-            guard board.installationModes.contains(template.mode) else { continue }
-            try require((template.mode != .linux || !template.layout.isEmpty) && template.layout.filter { $0.expand == true }.count <= 1, "Invalid compiled release partition definition")
-            if template.mode == .uefi { try require(template.layout.count == 1, "UEFI-only installation requires exactly one ESP") }
-            for part in template.layout {
-                try require(try part.bytes > 0, "Invalid compiled partition size")
-                try require(part.format == nil || part.format == "fat", "Unsupported partition format")
-            }
-            if let package = template.package { try require(URL(string: package)?.scheme != nil, "Compiled package URLs must be absolute") }
-            let id = board.id + ":" + String(index) + ":" + Data(template.name.utf8).sha256.prefix(12)
-            templates[id] = template
-        }
+        events(InstallEvent(.metadata))
+        templates = try ReleaseCatalog.candidates(ReleaseCatalog.fetch(configuration.catalogURL), board: board,
+            developer: configuration.developer, repository: configuration.repositoryURL)
+        if board.installationModes.contains(.bootloader) { templates[board.id + ":local:bootloader"] = .bootloaderOnly }
     }
     private func targets(_ scan: Scan) throws -> [StorageTarget] {
         var result: [StorageTarget] = []
@@ -85,7 +76,7 @@ public actor InstallerEngine {
             let record = try? JSONDecoder().decode(Stage2Record.self, from: Data(contentsOf: os.resources.appending("stage2.json")))
             return ExistingInstallation(id: os.vgid, name: os.label, needsFinalization: record.map { !$0.complete } ?? !os.registered, canUninstall: record?.ready == true && record?.managedLayout == true)
         }
-        try loadReleases(for: scan.board)
+        if existing.isEmpty { try loadReleases(for: scan.board) } else { templates = [:] }
         let software = try templates.sorted { $0.key < $1.key }.map { try $0.value.software(id: $0.key, storage: scan.board.storage) }
         return Inspection(model: scan.board.id, bootMode: scan.system.bootMode, administrator: scan.system.loginUser.isEmpty ? scan.current.administrators[0] : scan.system.loginUser, administrators: scan.current.administrators, targets: try targets(scan), software: software, existing: existing, board: scan.board.presentation, boardProfileID: scan.board.id, macOSReserveBytes: scan.board.storage.macOSReserveBytes)
     }
@@ -97,7 +88,7 @@ public actor InstallerEngine {
             plans[plan.id] = (plan, "demo"); return plan
         }
         let scan = try scan(readOnly: true)
-        guard let target = try targets(scan).first(where: { $0.id == selection.targetID }), let template = templates[selection.softwareID], scan.board.releases.contains(where: { $0.name == template.name && $0.mode == template.mode }) else { throw InstallerError("Your selection changed; check this Mac again") }
+        guard let target = try targets(scan).first(where: { $0.id == selection.targetID }), let template = templates[selection.softwareID], selection.softwareID.hasPrefix(scan.board.id + ":") else { throw InstallerError("Your selection changed; check this Mac again") }
         var plan = try makePlan(selection, target: target, software: template.software(id: selection.softwareID, storage: scan.board.storage), expandable: template.expandable, layoutBytes: scan.board.storage.stubBytes + template.minimum)
         plan.fingerprint = scan.fingerprint; plans.removeAll(); plans[plan.id] = (plan, scan.fingerprint); return plan
     }
@@ -238,7 +229,7 @@ public actor InstallerEngine {
         events(InstallEvent(.restart, fraction: 1))
     }
     private func resolvePackage(_ name: String) throws -> URL {
-        guard let url = URL(string: name), url.scheme != nil else { throw InstallerError("The compiled release has no absolute package URL") }; return url
+        try ReleaseCatalog.packageURL(name, repository: configuration.repositoryURL)
     }
     private func prepareBoot(_ os: InstalledOS, credentials: Credentials, recovery: Bool) throws {
         let core = os.system.appending("System/Library/CoreServices"), enabled = core.appending("SystemVersion.plist"), disabled = core.appending("SystemVersion-disabled.plist")
