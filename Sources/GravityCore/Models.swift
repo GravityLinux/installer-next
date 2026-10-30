@@ -134,8 +134,15 @@ public struct StorageTarget: Codable, Identifiable, Equatable, Sendable {
     public var existingFreeBytes: Int64? = nil
     public var unallocatedBytes: Int64 { kind == "free" ? alignDown(totalBytes) : existingFreeBytes ?? 0 }
     public var diagramTotalBytes: Int64 { totalBytes + (kind == "resize" ? unallocatedBytes : 0) }
-    public func shrinkBytes(for allocation: Int64) -> Int64 { kind == "resize" ? max(0, allocation - unallocatedBytes) : 0 }
-    public func boundedAllocation(_ requestedBytes: Int64) -> Int64 { min(maximumBytes, max(unallocatedBytes, alignDown(requestedBytes))) }
+    /// Positive reclaims space from macOS; negative gives unused space to it.
+    public func resizeBytes(for allocation: Int64) -> Int64 { kind == "resize" ? allocation - unallocatedBytes : 0 }
+    public func shrinkBytes(for allocation: Int64) -> Int64 { max(0, resizeBytes(for: allocation)) }
+    public func resizedMacOSBytes(for allocation: Int64) -> Int64? {
+        let change = resizeBytes(for: allocation)
+        return change == 0 ? nil : alignDown(totalBytes - change)
+    }
+    public func boundedAllocation(_ requestedBytes: Int64) -> Int64 { min(maximumBytes, max(0, alignDown(requestedBytes))) }
+    public func canAllocate(_ allocation: Int64, minimumBytes: Int64) -> Bool { allocation >= alignDown(minimumBytes) && allocation <= maximumBytes }
 }
 public struct ExistingInstallation: Codable, Identifiable, Sendable {
     public let id: String
@@ -154,6 +161,7 @@ public struct Inspection: Codable, Sendable {
     public var board: BoardPresentation? = nil
     public var boardProfileID: String? = nil
     public var macOSReserveBytes: Int64 = BoardStoragePolicy.defaultMacOSReserveBytes
+    public var minimumInstallBytes: Int64 = 30_000_000_000
 }
 public struct InstallSelection: Codable, Equatable, Sendable {
     public var targetID: String

@@ -156,58 +156,61 @@ private typealias T = InstallerTheme
     private var storage: some View {
         VStack(alignment: .leading, spacing: 28) {
             heading("How much space for Gravity Linux?", storageSubtitle)
-            if let target = model.target, model.maximumGB >= model.minimumGB, target.unavailableReason == nil {
+            if let target = model.target {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack { Text(target.name); Spacer(); Text(sizeText(target.diagramTotalBytes)) }.font(T.font(12)).foregroundStyle(T.muted)
                     storageBar(target)
                     HStack(spacing: 16) {
                         Text("Partition size").font(T.font(13, .medium)).fixedSize()
-                        PartitionSizeSlider(value: $model.sizeGB, bounds: model.minimumGB...max(model.minimumGB, model.maximumGB))
-                        Text(sizeText(model.allocationBytes)).font(T.mono(13)).frame(width: 64, alignment: .trailing)
+                        PartitionSizeSlider(value: Binding(get: { model.macOSGB }, set: { model.setMacOSGB($0) }), bounds: 0...max(1, model.partitionTotalGB))
+                        Text(model.allocationBytes == 0 ? "0 GB" : sizeText(model.allocationBytes)).font(T.mono(13)).frame(width: 64, alignment: .trailing)
                     }.padding(.top, 10)
                     Text(storageHelp).font(T.font(12)).foregroundStyle(T.muted).lineSpacing(2)
                 }
-            } else {
-                note(model.target?.unavailableReason ?? "There isn’t enough available space. Free space in macOS or review your APFS snapshots, then check this Mac again.", icon: "externaldrive.badge.exclamationmark")
+            }
+            if model.insufficientCapacity {
+                note("You need more space on this Mac", detail: "Gravity Linux needs at least \(sizeText(model.requiredInstallBytes)). Only \(sizeText(model.target?.maximumBytes ?? 0)) can currently be made available. Free up space in macOS, then check again.", icon: "externaldrive.badge.exclamationmark")
             }
             Spacer(minLength: 0)
             note("Nothing on your disk changes yet.", detail: "You’ll review every change before anything happens.", icon: "lock", inline: true)
         }
     }
     private var storageSubtitle: String {
-        guard let target = model.target, target.unallocatedBytes > 0 else { return "Shrink your macOS partition to make space for Gravity Linux." }
-        return target.maximumBytes > target.unallocatedBytes
-            ? "Existing unallocated space is included. Shrink macOS to make more room."
-            : "Use existing unallocated space for Gravity Linux."
+        "Move the slider left to give Gravity Linux more space, or right to keep more for macOS."
     }
     private var storageHelp: String {
-        if let target = model.target, target.unallocatedBytes > 0 && target.maximumBytes == target.unallocatedBytes {
-            return "All \(sizeText(target.unallocatedBytes)) of unallocated space is included. APFS currently doesn’t allow macOS to shrink further."
-        }
-        return "At least \(sizeText(Int64(model.minimumGB * 1e9))). We leave at least \(sizeText(model.inspection?.macOSReserveBytes ?? BoardStoragePolicy.defaultMacOSReserveBytes)) free inside macOS."
+        return "Choose at least \(sizeText(model.requiredInstallBytes)) for Gravity Linux. We leave at least \(sizeText(model.inspection?.macOSReserveBytes ?? BoardStoragePolicy.defaultMacOSReserveBytes)) free inside macOS."
     }
     private func storageBar(_ target: StorageTarget) -> some View {
         let linux = model.allocationBytes, left = max(0, target.diagramTotalBytes - linux)
         let used = target.kind == "free" ? 0 : max(0, target.totalBytes - target.freeBytes)
         return GeometryReader { g in
-            let width = max(0, g.size.width * CGFloat(left) / CGFloat(max(1, target.diagramTotalBytes)))
-            HStack(spacing: 6) {
-                ZStack(alignment: .leading) {
-                    T.surface
-                    T.hairline.frame(width: min(width, width * CGFloat(used) / CGFloat(max(1, left))))
+            if linux == 0 {
+                macOSSegment(target, bytes: left, used: used, width: g.size.width).clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                let available = max(0, g.size.width - 16)
+                let width = max(0, available * CGFloat(left) / CGFloat(max(1, target.diagramTotalBytes)))
+                HStack(spacing: 6) {
+                    macOSSegment(target, bytes: left, used: used, width: width)
+                    Capsule().fill(T.border).frame(width: 4, height: 32).frame(height: 72)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(target.kind == "free" ? "Unallocated" : "macOS").font(T.font(14, .semibold))
-                        Text(target.kind == "free" ? sizeText(left) : "\(sizeText(left)) · \(sizeText(max(0, left-used))) free").font(T.font(12)).lineLimit(1)
-                    }.padding(.horizontal, 16)
-                }.frame(width: width).clipShape(PartitionSegment(leading: true))
-                Capsule().fill(T.border).frame(width: 4, height: 32).frame(height: 72)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Gravity Linux").font(T.font(14, .semibold)).lineLimit(1).minimumScaleFactor(0.85)
-                    Text(sizeText(linux)).font(T.font(12))
-                }.padding(.horizontal, 16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                    .foregroundStyle(.white).background(T.accent).clipShape(PartitionSegment(leading: false))
+                        Text("Gravity Linux").font(T.font(14, .semibold)).lineLimit(1).minimumScaleFactor(0.85)
+                        Text(sizeText(linux)).font(T.font(12))
+                    }.padding(.horizontal, 16).frame(width: max(0, available-width), height: 72, alignment: .leading)
+                        .foregroundStyle(.white).background(T.accent).clipShape(PartitionSegment(leading: false))
+                }
             }
         }.frame(height: 72).accessibilityElement(children: .combine)
+    }
+    private func macOSSegment(_ target: StorageTarget, bytes: Int64, used: Int64, width: CGFloat) -> some View {
+        ZStack(alignment: .leading) {
+            T.surface
+            T.hairline.frame(width: min(width, width * CGFloat(used) / CGFloat(max(1, bytes))))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(target.kind == "free" ? "Unallocated" : "macOS").font(T.font(14, .semibold))
+                Text(target.kind == "free" ? sizeText(bytes) : "\(sizeText(bytes)) · \(sizeText(max(0, bytes-used))) free").font(T.font(12)).lineLimit(1)
+            }.padding(.horizontal, 16)
+        }.frame(width: width, height: 72).clipShape(PartitionSegment(leading: true))
     }
     private var software: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -234,6 +237,9 @@ private typealias T = InstallerTheme
             }
             if model.busy { HStack(spacing: 10) { ProgressView().controlSize(.small); Text("Checking available images…").font(T.font(13)).foregroundStyle(T.muted) } }
             else if (model.inspection?.software.isEmpty ?? true) { Text("No compatible images are currently available from the CDN for this board.").font(T.font(13)).foregroundStyle(T.muted) }
+            if model.software != nil && !model.validAllocation {
+                Text(model.insufficientCapacity ? "You need more space on this Mac for this image." : "Go back and give Gravity Linux at least \(sizeText(model.requiredInstallBytes)).").font(T.font(13)).foregroundStyle(T.muted)
+            }
             Spacer(minLength: 0)
         }
     }
@@ -250,7 +256,7 @@ private typealias T = InstallerTheme
                 VStack(spacing: 0) {
                     T.hairline.frame(height: 1)
                     reviewRow(plan.target.kind == "resize" ? "macOS" : "Storage",
-                        plan.macOSAfterBytes.map { "Shrinks from \(sizeText(plan.target.totalBytes)) to \(sizeText($0))" } ?? (plan.target.kind == "resize" ? "Keeps its current \(sizeText(plan.target.totalBytes)) size" : "Use existing unallocated space"),
+                        plan.macOSAfterBytes.map { "\($0 < plan.target.totalBytes ? "Shrinks" : "Grows") from \(sizeText(plan.target.totalBytes)) to \(sizeText($0))" } ?? (plan.target.kind == "resize" ? "Keeps its current \(sizeText(plan.target.totalBytes)) size" : "Use existing unallocated space"),
                         detail: plan.target.kind == "resize" ? "Your files, apps and settings stay exactly as they are" : "macOS keeps its current partition size")
                     reviewRow("Gravity Linux", "New \(sizeText(plan.selection.bytes)) space")
                     reviewRow("Software", plan.software.name)
@@ -446,8 +452,8 @@ private typealias T = InstallerTheme
             case .welcome: PillButton(title: "Quit") { NSApp.terminate(nil) }; PillButton(title: "Continue", primary: true) { model.screen = .storage }
             case .storage:
                 PillButton(title: "Go Back") { model.screen = .welcome }
-                PillButton(title: "Continue", primary: true) { model.clampSize(); Task { await model.chooseSoftware() } }.disabled(model.target == nil || model.maximumGB < model.minimumGB || model.target?.unavailableReason != nil)
-            case .software: PillButton(title: "Go Back") { model.screen = .storage }; PillButton(title: "Continue", primary: true) { Task { await model.review() } }.disabled(model.software == nil || model.busy)
+                PillButton(title: "Continue", primary: true) { model.clampSize(); Task { await model.chooseSoftware() } }.disabled(!model.validAllocation || model.busy)
+            case .software: PillButton(title: "Go Back") { model.screen = .storage }; PillButton(title: "Continue", primary: true) { Task { await model.review() } }.disabled(model.software == nil || !model.validAllocation || model.busy)
             case .review:
                 PillButton(title: "Go Back") { model.screen = model.maintenance == nil ? .software : .existing }
                 PillButton(title: model.maintenance?.operation == "uninstall" ? "Uninstall" : "Install", primary: true) { model.credentialsSheet = true }

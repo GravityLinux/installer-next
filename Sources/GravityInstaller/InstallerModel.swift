@@ -68,9 +68,14 @@ enum Screen: Int { case checking = -1, welcome, storage, software, review, insta
     var target: StorageTarget? { inspection?.targets.first { $0.id == targetID } }
     var software: Software? { inspection?.software.first { $0.id == softwareID } }
     var board: BoardPresentation? { inspection?.board ?? stage2?.board }
-    var minimumGB: Double { max(ceil(Double(software?.minimumBytes ?? 30_000_000_000) / 1e9), Double(target?.unallocatedBytes ?? 0) / 1e9) }
+    var requiredInstallBytes: Int64 { software?.minimumBytes ?? inspection?.minimumInstallBytes ?? 30_000_000_000 }
     var maximumGB: Double { Double(target?.maximumBytes ?? 0) / 1e9 }
     var allocationBytes: Int64 { target?.boundedAllocation(Int64((sizeGB * 1e9).rounded())) ?? Int64((sizeGB * 1e9).rounded()) }
+    var partitionTotalGB: Double { Double(target?.diagramTotalBytes ?? 0) / 1e9 }
+    var macOSGB: Double { partitionTotalGB - Double(allocationBytes) / 1e9 }
+    var insufficientCapacity: Bool { target.map { !$0.canAllocate($0.maximumBytes, minimumBytes: requiredInstallBytes) } ?? true }
+    var validAllocation: Bool { target?.canAllocate(allocationBytes, minimumBytes: requiredInstallBytes) == true }
+    func setMacOSGB(_ value: Double) { sizeGB = max(0, min(maximumGB, partitionTotalGB - value)) }
     var active: Int {
         switch screen {
         case .storage: return 1
@@ -97,15 +102,15 @@ enum Screen: Int { case checking = -1, welcome, storage, software, review, insta
             } else {
                 let info = try await engine.inspect(); inspection = info
                 softwareID = info.software.first?.id ?? ""
-                targetID = info.targets.first(where: { $0.unavailableReason == nil && $0.maximumBytes >= (software?.minimumBytes ?? 30_000_000_000) })?.id ?? info.targets.first?.id ?? ""
-                if let target, target.unallocatedBytes > 0 { sizeGB = Double(target.unallocatedBytes) / 1e9 }
+                targetID = info.targets.first(where: { $0.unavailableReason == nil && $0.maximumBytes >= requiredInstallBytes })?.id ?? info.targets.first?.id ?? ""
+                sizeGB = Double(target?.unallocatedBytes ?? 0) / 1e9
                 username = info.administrator; selectedExisting = info.existing.first?.id ?? ""
                 clampSize(); screen = info.existing.isEmpty ? .welcome : .existing
             }
         } catch let issue as BoardSupportError { supportIssue = issue; screen = .unsupported }
           catch { self.error = error.localizedDescription; screen = .failure }
     }
-    func clampSize() { sizeGB = min(max(sizeGB, minimumGB), max(minimumGB, maximumGB)) }
+    func clampSize() { sizeGB = min(max(sizeGB, 0), max(0, maximumGB)) }
     func chooseSoftware() async {
         guard !busy else { return }
         screen = .software; busy = true; error = nil

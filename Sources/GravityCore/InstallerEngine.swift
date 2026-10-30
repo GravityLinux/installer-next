@@ -88,7 +88,8 @@ public actor InstallerEngine {
             return ExistingInstallation(id: os.vgid, name: os.label, needsFinalization: record.map { !$0.complete } ?? !os.registered, canUninstall: record?.ready == true && record?.managedLayout == true)
         }
         templates = [:]
-        return Inspection(model: scan.board.id, bootMode: scan.system.bootMode, administrator: scan.system.loginUser.isEmpty ? scan.current.administrators[0] : scan.system.loginUser, administrators: scan.current.administrators, targets: try targets(scan), software: [], existing: existing, board: scan.board.presentation, boardProfileID: scan.board.id, macOSReserveBytes: scan.board.storage.macOSReserveBytes)
+        return Inspection(model: scan.board.id, bootMode: scan.system.bootMode, administrator: scan.system.loginUser.isEmpty ? scan.current.administrators[0] : scan.system.loginUser, administrators: scan.current.administrators, targets: try targets(scan), software: [], existing: existing, board: scan.board.presentation, boardProfileID: scan.board.id, macOSReserveBytes: scan.board.storage.macOSReserveBytes,
+            minimumInstallBytes: configuration.developer && scan.board.installationModes.contains(.bootloader) ? scan.board.storage.stubBytes : scan.board.storage.minimumLinuxBytes)
     }
     /// Query image metadata only when a client opens software selection.
     public func availableSoftware() throws -> [Software] {
@@ -115,12 +116,12 @@ public actor InstallerEngine {
         var selection = selection; selection.bytes = alignDown(selection.bytes)
         selection.name = selection.name.trimmingCharacters(in: .whitespacesAndNewlines)
         try require(!selection.name.isEmpty && selection.name.utf8.count <= 64 && !selection.name.contains("/") && !selection.name.unicodeScalars.contains { $0.value < 32 }, "Choose a volume name of at most 64 bytes without slashes or control characters")
-        let minimum = max(alignDown(software.minimumBytes), target.unallocatedBytes)
-        try require(selection.bytes >= minimum && selection.bytes <= target.maximumBytes, "Choose an installation size between \(sizeText(minimum)) and \(sizeText(target.maximumBytes))")
-        let shrink = target.shrinkBytes(for: selection.bytes)
-        let after = shrink > 0 ? alignDown(target.totalBytes - shrink) : nil
-        var changes = [after.map { "Shrink \(target.name) from \(sizeText(target.totalBytes)) to \(sizeText($0))" } ?? "Use existing unallocated space"]
-        if after != nil && target.unallocatedBytes > 0 { changes.append("Include all \(sizeText(target.unallocatedBytes)) of existing adjacent unallocated space") }
+        let minimum = alignDown(software.minimumBytes)
+        try require(target.canAllocate(selection.bytes, minimumBytes: software.minimumBytes), "Choose an installation size between \(sizeText(minimum)) and \(sizeText(target.maximumBytes))")
+        let resize = target.resizeBytes(for: selection.bytes), after = target.resizedMacOSBytes(for: selection.bytes)
+        var changes = [after.map { "\(resize > 0 ? "Shrink" : "Grow") \(target.name) from \(sizeText(target.totalBytes)) to \(sizeText($0))" } ?? "Use existing unallocated space"]
+        if resize > 0 && target.unallocatedBytes > 0 { changes.append("Include all \(sizeText(target.unallocatedBytes)) of existing adjacent unallocated space") }
+        if resize < 0 { changes.append("Return \(sizeText(-resize)) of existing unallocated space to macOS") }
         if software.mode == .linux {
             changes += ["Create the startup and Linux partitions for \(software.name)"]
             let fixed = layoutBytes ?? software.minimumBytes
@@ -166,9 +167,10 @@ public actor InstallerEngine {
         guard let selected = fresh.partitions.first(where: { $0.id == plan.selection.targetID }), let target = try targets(fresh).first(where: { $0.id == selected.id }) else { throw InstallerError("Selected space no longer exists") }
         try require(plan.selection.bytes <= target.maximumBytes, "Available space changed; review a smaller installation")
         var after = selected.name
-        let shrink = target.shrinkBytes(for: plan.selection.bytes)
-        if shrink > 0 {
-            events(InstallEvent(.resize)); _ = try fresh.disk.action(["apfs", "resizeContainer", selected.name, String(alignDown(selected.size - shrink))])
+        let resize = target.resizeBytes(for: plan.selection.bytes)
+        if let macOSBytes = target.resizedMacOSBytes(for: plan.selection.bytes) {
+            events(resize < 0 ? InstallEvent(.resize, help: "Apple’s APFS tool is expanding macOS into unused space. Let it finish before continuing.", title: "Giving macOS more space") : InstallEvent(.resize))
+            _ = try fresh.disk.action(["apfs", "resizeContainer", selected.name, String(macOSBytes)])
             try fresh.disk.refresh()
             guard let free = try fresh.disk.partitions(fresh.name).first(where: { $0.free && $0.name == selected.name }) else { throw InstallerError("Resize completed but no adjacent free space was found; check the disk before continuing") }
             try require(free.size >= plan.selection.bytes, "The freed space is smaller than the reviewed installation")
@@ -307,7 +309,8 @@ public actor InstallerEngine {
         if configuration.developer { software.append(try SoftwareTemplate.bootloaderOnly.software(id: "demo-bootloader", storage: board.storage)) }
         return Inspection(model: board.presentation.productNumber, bootMode: "macOS", administrator: "demo", administrators: ["demo"],
             targets: [StorageTarget(id: "demo-storage", name: "Macintosh HD", kind: "resize", totalBytes: 494_000_000_000, freeBytes: 352_000_000_000, maximumBytes: alignDown(352_000_000_000 - board.storage.macOSReserveBytes))],
-            software: software, existing: [], board: board.presentation, boardProfileID: board.id, macOSReserveBytes: board.storage.macOSReserveBytes)
+            software: software, existing: [], board: board.presentation, boardProfileID: board.id, macOSReserveBytes: board.storage.macOSReserveBytes,
+            minimumInstallBytes: configuration.developer ? board.storage.stubBytes : board.storage.minimumLinuxBytes)
     }
 }
 public struct Stage2Status: Codable, Sendable {

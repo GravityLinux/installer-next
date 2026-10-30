@@ -118,7 +118,7 @@ struct PartitionSizeSlider: View {
     var body: some View {
         Slider(value: Binding(get: { value }, set: { set($0) }), in: bounds.lowerBound...max(bounds.lowerBound + 1, bounds.upperBound))
             .labelsHidden().frame(height: 24).disabled(bounds.lowerBound == bounds.upperBound)
-            .accessibilityLabel("Partition size").accessibilityValue("\(Int(value)) GB")
+            .accessibilityLabel("Space for macOS").accessibilityValue("\(Int(value)) GB")
             .onMoveCommand { direction in set(value + (direction == .left || direction == .down ? -1 : 1)) }
             .accessibilityAdjustableAction { direction in set(value + (direction == .increment ? 1 : -1)) }
     }

@@ -77,9 +77,10 @@ private final class ReadOnlyInspectionCommands: CommandRunning, @unchecked Senda
     let extra = alignDown(5_000_000_000)
     let larger = try await engine.plan(InstallSelection(targetID: target.id, softwareID: choices[0].id, bytes: target.unallocatedBytes + extra))
     #expect(larger.macOSAfterBytes == alignDown(target.totalBytes - extra))
-    await #expect(throws: (any Error).self) {
-        try await engine.plan(InstallSelection(targetID: target.id, softwareID: choices[0].id, bytes: target.unallocatedBytes - 1_048_576))
-    }
+    let smaller = try await engine.plan(InstallSelection(targetID: target.id, softwareID: choices[0].id, bytes: target.unallocatedBytes - 1_048_576))
+    #expect(smaller.macOSAfterBytes == alignDown(target.totalBytes + 1_048_576))
+    #expect(smaller.changes.first?.hasPrefix("Grow Macintosh HD") == true)
+    await #expect(throws: (any Error).self) { try await engine.plan(InstallSelection(targetID: target.id, softwareID: choices[0].id, bytes: 0)) }
     #expect(!commands.calls.contains { $0.0.hasSuffix("bputil") || $0.1.first == "mount" })
     commands.capacityFree = 5_000_000_000
     let smallerMargin = try await engine.inspect()

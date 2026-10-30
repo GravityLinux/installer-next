@@ -126,12 +126,17 @@ experimental-board access, Linux-image CRC bypass, detailed logging and local
 download retention. Apple recovery hashes, firmware validation, archive bounds
 and board identity checks always apply. Retained archive ranges are private to
 this Mac and reused only when the server validator and length still match.
-The partition screen automatically includes all unallocated space immediately
-after macOS. Its slider adds space by shrinking macOS further; no separate
-storage-choice rows are shown. The default leaves **2 GB free inside macOS**,
+The partition slider represents the macOS/Linux boundary across their combined
+space. With no unallocated space it starts at the far right with Linux at zero.
+With adjacent unallocated space it starts proportionally at the current macOS
+boundary, initially giving Linux that free space. Moving left gives Linux more;
+moving right gives macOS more, growing macOS into unused space when needed.
+There are no separate storage-choice rows. The default leaves **2 GB free inside macOS**,
 subject to APFS's reported hard minimum. The preferred-size recommendation does
-not impose an additional reserve. Using only the existing free extent does not
-run a macOS resize. UEFI/bootloader-only modes retain their stub/ESP-only layouts
+not impose an additional reserve. Selecting exactly the existing free extent does
+not resize macOS. Continue is disabled for an undersized Linux allocation; a
+separate capacity check reports when the maximum available space is insufficient.
+These invalid-state presentations still need a design pass. UEFI/bootloader-only modes retain their stub/ESP-only layouts
 and leave the rest free for a future OS.
 
 The current developer-gated board screen is an unapproved placeholder awaiting a
