@@ -33,16 +33,12 @@ import GravityCore
             }
             CommandGroup(replacing: .help) { Link("1TR entry guide", destination: GuideLinks.recovery); Link("How we keep your Mac safe", destination: GuideLinks.safety) }
         }
-        Window("Developer Options", id: "developer-options") {
-            DeveloperOptionsView(model: model).background(InstallerWindowStyle()).ignoresSafeArea()
-        }.windowStyle(.hiddenTitleBar).windowResizability(.contentSize)
     }
 }
 private typealias T = InstallerTheme
 
 @MainActor struct InstallerView: View {
     @ObservedObject var model: InstallerModel
-    @Environment(\.openWindow) private var openWindow
     var body: some View {
         ZStack(alignment: .top) {
             VStack(spacing: 0) {
@@ -66,7 +62,7 @@ private typealias T = InstallerTheme
                 else { authenticationSheet.padding(.top, 44) }
             }
         }.foregroundStyle(T.ink).font(T.font(14)).tint(T.accent).background(.white).preferredColorScheme(.light)
-        .onChange(of: model.developerSheet) { open in if open { openWindow(id: "developer-options"); model.developerSheet = false } }
+        .onChange(of: model.developerSheet) { open in if open { DeveloperOptionsWindow.shared.show(model: model); model.developerSheet = false } }
         .onExitCommand { if model.credentialsSheet { model.credentialsSheet = false; model.password = "" }; model.safety = false }
         .alert("Gravity Linux Installer", isPresented: Binding(get: { model.error != nil && model.screen != .failure }, set: { if !$0 { model.error = nil } })) {
             Button("OK") { model.error = nil }

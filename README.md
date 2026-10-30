@@ -96,6 +96,9 @@ The original HTML design is preserved at `docs/design/reference.html`. The
 screen-by-screen review is `docs/design/audit.csv`. Generate the native views
 with `swift run gravity-installer --render-preview dist/design-review/current`.
 The UI uses the design's Geist fonts, shipped under the bundled font license.
+Preview rendering also checks the real Developer Options window for extra
+title-bar space and verifies that Done leaves the installer open even when the
+installer has keyboard focus. Developer Options sizes itself to its contents.
 
 Startup inspection and review use read-only queries and never mount volumes or
 read privileged boot policy. Ask for credentials after Review. The GUI/TUI starts

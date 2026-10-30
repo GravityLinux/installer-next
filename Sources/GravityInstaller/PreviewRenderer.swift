@@ -6,6 +6,7 @@ import GravityCore
 @MainActor enum PreviewRenderer {
     static func render(model: InstallerModel, to directory: URL) async throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try await checkDeveloperWindow(model: model, directory: directory)
         model.renderingPreview = true
         var inspection = try await model.engine.inspect(); inspection.software = try await model.engine.availableSoftware()
         model.inspection = inspection; model.softwareID = inspection.software.first?.id ?? ""
@@ -32,8 +33,8 @@ import GravityCore
             try await snapshot(InstallerView(model: model), size: NSSize(width: 880, height: 600), to: directory.appendingPathComponent(name + ".png"))
         }
         model.safety = false; model.credentialsSheet = false; model.developer = false
-        try await snapshot(DeveloperOptionsView(model: model, previewEnabled: false), size: NSSize(width: 520, height: 220), to: directory.appendingPathComponent("developer-options-off.png"))
-        try await snapshot(DeveloperOptionsView(model: model, previewEnabled: true), size: NSSize(width: 520, height: 640), to: directory.appendingPathComponent("developer-options-on.png"))
+        try await fittingSnapshot(DeveloperOptionsView(model: model, previewEnabled: false), to: directory.appendingPathComponent("developer-options-off.png"))
+        try await fittingSnapshot(DeveloperOptionsView(model: model, previewEnabled: true), to: directory.appendingPathComponent("developer-options-on.png"))
         model.screen = .storage; model.inspection = try changing(inspection, ["targets": [
             ["id": "demo-no-shrink", "name": "Macintosh HD", "kind": "resize", "totalBytes": 80_000_000_000, "freeBytes": 5_000_000_000, "maximumBytes": 0,
              "unavailableReason": "macOS has 5 GB free. At least 40 GB must remain free after shrinking. Free space in macOS to enable this option."],
@@ -41,6 +42,24 @@ import GravityCore
         model.targetID = "demo-free"; model.sizeGB = 60
         try await snapshot(InstallerView(model: model), size: NSSize(width: 880, height: 600), to: directory.appendingPathComponent("storage-no-shrink.png"))
         print("Rendered nineteen demo views to \(directory.path)")
+    }
+    private static func checkDeveloperWindow(model: InstallerModel, directory: URL) async throws {
+        guard let installer = NSApp.windows.first(where: { $0.isVisible && $0.title == "Install Gravity Linux" }) else { throw InstallerError("The installer window is missing") }
+        model.developer = true
+        DeveloperOptionsWindow.shared.show(model: model)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        guard let options = NSApp.windows.first(where: { $0.isVisible && $0.title == "Developer Options" }), let content = options.contentView else { throw InstallerError("Developer Options did not open") }
+        let height = options.frame.height, fitting = content.fittingSize.height
+        let expected = NSHostingView(rootView: DeveloperOptionsView(model: model, previewEnabled: true)).fittingSize.height
+        guard abs(height-fitting) <= 1 && abs(height-expected) <= 1 else { throw InstallerError("Developer Options has excess window chrome space") }
+        // Deliberately focus the installer before running the exact operation
+        // behind Done: selecting NSApp.keyWindow here would close the wrong UI.
+        installer.makeKeyAndOrderFront(nil)
+        await DeveloperOptionsWindow.finish(model: model, enabled: true, options: model.developerOptions, window: options)
+        guard installer.isVisible && !options.isVisible else { throw InstallerError("Done did not close only Developer Options") }
+        let result: [String: Any] = ["doneKeepsInstallerOpen": true, "developerWindowHeight": height, "contentHeight": fitting, "naturalContentHeight": expected]
+        try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]).write(to: directory.appendingPathComponent("window-check.json"))
+        model.developer = false; model.createEngine(); await model.load()
     }
     private static func changing<T: Codable>(_ value: T, _ fields: [String: Any]) throws -> T {
         var object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(value)) as! [String: Any]
@@ -57,5 +76,10 @@ import GravityCore
         host.cacheDisplay(in: host.bounds, to: bitmap)
         guard let data = bitmap.representation(using: .png, properties: [:]) else { throw InstallerError("Could not encode the preview") }
         try data.write(to: url); window.orderOut(nil)
+    }
+    private static func fittingSnapshot<V: View>(_ view: V, to url: URL) async throws {
+        let host = NSHostingView(rootView: view)
+        let size = host.fittingSize
+        try await snapshot(view, size: NSSize(width: 520, height: ceil(size.height)), to: url)
     }
 }
