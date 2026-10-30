@@ -151,7 +151,7 @@ private final class FixtureRecoveryCommands: CommandRunning, @unchecked Sendable
 @Test func clientsReceiveBoardPresentationWithoutModelBranches() async throws {
     let board = fixtureBoard(), registry = try BoardRegistry(profiles: [board])
     let engine = InstallerEngine(configuration: EngineConfiguration(resourceDirectory: URL(fileURLWithPath: "/fixture"), demo: true), boards: registry)
-    let info = try await engine.inspect(), stage2 = try await engine.stage2Status()
+    var info = try await engine.inspect(); info.software = try await engine.availableSoftware(); let stage2 = try await engine.stage2Status()
     #expect(info.boardProfileID == board.id && info.board?.productNumber == board.id)
     #expect(info.macOSReserveBytes == 48_000_000_000 && info.software.first?.minimumBytes == 36_000_000_000)
     #expect(stage2.board?.powerButtonHelp == "Fixture power instructions")

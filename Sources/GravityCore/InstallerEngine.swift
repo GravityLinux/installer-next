@@ -10,11 +10,12 @@ public actor InstallerEngine {
     private let events: EventSink
     private let log: InstallationLog
     private var templates: [String: SoftwareTemplate] = [:]
+    private var inspectedBoard: BoardProfile?
     private var plans: [String: (InstallPlan, String)] = [:]
     private var maintenancePlans: [String: MaintenancePlan] = [:]
     public init(configuration: EngineConfiguration, commands: CommandRunning = SystemCommands(), boards: BoardRegistry = .builtIn, events: @escaping EventSink = { _ in }) {
         self.configuration = configuration; self.commands = commands; self.boards = boards
-        let log = InstallationLog(enabled: !configuration.demo && geteuid() == 0)
+        let log = InstallationLog(enabled: !configuration.demo && geteuid() == 0, verbose: !configuration.developer || configuration.developerOptions.verboseLogging)
         self.log = log
         self.events = { event in log.append(event); events(event) }
     }
@@ -22,9 +23,9 @@ public actor InstallerEngine {
     /// Read-only preflight, usable before authorization or downloads.
     public func checkBoardSupport() throws -> BoardPresentation {
         if configuration.demo { return try demoBoard().presentation }
-        if let url = configuration.stage2URL { return try Stage2Context(url, boards: boards, developer: configuration.developer).board.presentation }
+        if let url = configuration.stage2URL { return try Stage2Context(url, boards: boards, developer: configuration.boardDeveloper).board.presentation }
         let tree = try MacSystem.deviceTree(commands.run("/usr/sbin/ioreg", ["-alp", "IODeviceTree"], input: nil))
-        return try boards.resolve(MacSystem.hardware(in: tree), developer: configuration.developer).presentation
+        return try boards.resolve(MacSystem.hardware(in: tree), developer: configuration.boardDeveloper).presentation
     }
     private struct Scan {
         let board: BoardProfile
@@ -36,7 +37,7 @@ public actor InstallerEngine {
     private func scan(readOnly: Bool = false) throws -> Scan {
         if !readOnly { try root() }; events(InstallEvent(.inspecting))
         let system = try MacSystem(commands: commands, readOnly: readOnly)
-        let board = try boards.resolve(system.hardware, developer: configuration.developer); try system.validate(board: board)
+        let board = try boards.resolve(system.hardware, developer: configuration.boardDeveloper); try system.validate(board: board)
         let disk = DiskManager(commands: commands); try disk.refresh(); let name = try disk.systemDisk(), parts = try disk.partitions(name)
         try require(string(disk.disks[name]?["Content"]) == "GUID_partition_scheme", "The internal disk must use a GUID partition map")
         let systems = try parts.flatMap { try disk.operatingSystems($0, system: system, readOnly: readOnly) }
@@ -53,7 +54,7 @@ public actor InstallerEngine {
         events(InstallEvent(.metadata))
         templates = try ReleaseCatalog.candidates(ReleaseCatalog.fetch(configuration.catalogURL), board: board,
             developer: configuration.developer, repository: configuration.repositoryURL)
-        if board.installationModes.contains(.bootloader) { templates[board.id + ":local:bootloader"] = .bootloaderOnly }
+        if configuration.developer && board.installationModes.contains(.bootloader) { templates[board.id + ":local:bootloader"] = .bootloaderOnly }
     }
     private func targets(_ scan: Scan) throws -> [StorageTarget] {
         var result: [StorageTarget] = []
@@ -62,23 +63,36 @@ public actor InstallerEngine {
                 result.append(StorageTarget(id: part.id, name: "Available space after \(part.name)", kind: "free", totalBytes: part.size, freeBytes: part.size, maximumBytes: alignDown(part.size)))
             } else if part.uuid == scan.current.partition.uuid {
                 let maximum = try scan.disk.maximumResize(part, reserveBytes: scan.board.storage.macOSReserveBytes)
-                if maximum >= scan.board.storage.stubBytes {
-                    result.append(StorageTarget(id: part.id, name: scan.current.label, kind: "resize", totalBytes: part.size, freeBytes: int(part.container["CapacityFree"]), maximumBytes: maximum))
+                let free = int(part.container["CapacityFree"])
+                var target = StorageTarget(id: part.id, name: scan.current.label, kind: "resize", totalBytes: part.size, freeBytes: free, maximumBytes: maximum)
+                if maximum < scan.board.storage.stubBytes {
+                    target.unavailableReason = free < scan.board.storage.macOSReserveBytes
+                        ? "macOS has \(sizeText(free)) free. At least \(sizeText(scan.board.storage.macOSReserveBytes)) must remain free after shrinking. Free space in macOS to enable this option."
+                        : "APFS cannot currently shrink this volume enough for an installation. Free space or review local snapshots, then check again."
                 }
+                result.append(target)
             }
         }
         return result
     }
     public func inspect() throws -> Inspection {
-        if configuration.demo { return try demoInspection() }
+        if configuration.demo { var info = try demoInspection(); info.software = []; return info }
         let scan = try scan(readOnly: true)
+        inspectedBoard = scan.board
         let existing = scan.systems.filter { $0.stub && fm.fileExists(atPath: $0.resources.appending("boot.bin").path) }.map { os in
             let record = try? JSONDecoder().decode(Stage2Record.self, from: Data(contentsOf: os.resources.appending("stage2.json")))
             return ExistingInstallation(id: os.vgid, name: os.label, needsFinalization: record.map { !$0.complete } ?? !os.registered, canUninstall: record?.ready == true && record?.managedLayout == true)
         }
-        if existing.isEmpty { try loadReleases(for: scan.board) } else { templates = [:] }
-        let software = try templates.sorted { $0.key < $1.key }.map { try $0.value.software(id: $0.key, storage: scan.board.storage) }
-        return Inspection(model: scan.board.id, bootMode: scan.system.bootMode, administrator: scan.system.loginUser.isEmpty ? scan.current.administrators[0] : scan.system.loginUser, administrators: scan.current.administrators, targets: try targets(scan), software: software, existing: existing, board: scan.board.presentation, boardProfileID: scan.board.id, macOSReserveBytes: scan.board.storage.macOSReserveBytes)
+        templates = [:]
+        return Inspection(model: scan.board.id, bootMode: scan.system.bootMode, administrator: scan.system.loginUser.isEmpty ? scan.current.administrators[0] : scan.system.loginUser, administrators: scan.current.administrators, targets: try targets(scan), software: [], existing: existing, board: scan.board.presentation, boardProfileID: scan.board.id, macOSReserveBytes: scan.board.storage.macOSReserveBytes)
+    }
+    /// Query image metadata only when a client opens software selection.
+    public func availableSoftware() throws -> [Software] {
+        if configuration.demo { return try demoInspection().software }
+        if inspectedBoard == nil { _ = try inspect() }
+        guard let board = inspectedBoard else { throw InstallerError("Inspect this Mac before choosing software.") }
+        try loadReleases(for: board)
+        return try templates.sorted { $0.key < $1.key }.map { try $0.value.software(id: $0.key, storage: board.storage) }
     }
     public func plan(_ selection: InstallSelection) throws -> InstallPlan {
         if configuration.demo {
@@ -90,7 +104,8 @@ public actor InstallerEngine {
         let scan = try scan(readOnly: true)
         guard let target = try targets(scan).first(where: { $0.id == selection.targetID }), let template = templates[selection.softwareID], selection.softwareID.hasPrefix(scan.board.id + ":") else { throw InstallerError("Your selection changed; check this Mac again") }
         var plan = try makePlan(selection, target: target, software: template.software(id: selection.softwareID, storage: scan.board.storage), expandable: template.expandable, layoutBytes: scan.board.storage.stubBytes + template.minimum)
-        plan.fingerprint = scan.fingerprint; plans.removeAll(); plans[plan.id] = (plan, scan.fingerprint); return plan
+        plan.fingerprint = scan.fingerprint; plan.policyFingerprint = configuration.policyFingerprint
+        plans.removeAll(); plans[plan.id] = (plan, scan.fingerprint); return plan
     }
     private func makePlan(_ selection: InstallSelection, target: StorageTarget, software: Software, expandable: Bool, layoutBytes: Int64? = nil) throws -> InstallPlan {
         var selection = selection; selection.bytes = alignDown(selection.bytes)
@@ -132,14 +147,14 @@ public actor InstallerEngine {
         try require(first.system.bootMode == "macOS", "Begin a new installation from macOS. Use --stage2 in paired recovery to finish.")
         try validate(credentials, first.current)
         events(InstallEvent(.package))
-        let archive = try template.package.map { try ZIPArchive(resolvePackage($0)) }
+        let archive = try template.package.map { try ZIPArchive(resolvePackage($0), verifyCRC: !configuration.bypassImageChecks, cacheDirectory: configuration.downloadCache) }
         // Resolve required boot assets and the image inventory before any mutation.
         _ = try Data(contentsOf: first.board.boot.resource(template.boot_object, in: configuration.resourceDirectory))
         _ = try Data(contentsOf: configuration.resourceDirectory.appending("logo.icns"))
         for partition in template.layout {
             if let image = partition.image { guard let archive else { throw InstallerError("Release image has no package") }; _ = try archive.entry(image) }
         }
-        let stub = try StubInstaller(system: first.system, disk: first.disk, board: first.board, resources: configuration.resourceDirectory, app: app, events: events)
+        let stub = try StubInstaller(system: first.system, disk: first.disk, board: first.board, resources: configuration.resourceDirectory, app: app, events: events, downloadCache: configuration.downloadCache)
         let fresh = try scan(); try require(fresh.fingerprint == fingerprint, "Disk layout changed during downloads; review a new plan")
         guard let selected = fresh.partitions.first(where: { $0.id == plan.selection.targetID }), let target = try targets(fresh).first(where: { $0.id == selected.id }) else { throw InstallerError("Selected space no longer exists") }
         try require(plan.selection.bytes <= target.maximumBytes, "Available space changed; review a smaller installation")
@@ -187,10 +202,11 @@ public actor InstallerEngine {
         if let icon = template.icon { try archive?.extract(icon, to: os.system.appending(".VolumeIcon.icns")) }
         for (partition, part) in zip(template.layout, parts) {
             if let image = partition.image, let archive {
-                events(InstallEvent(.systemImage, detail: partition.name)); let entry = try archive.entry(image)
+                let help = configuration.bypassImageChecks ? "Writing the selected Linux image. Image checksum verification was disabled in Developer Options." : nil
+                events(InstallEvent(.systemImage, detail: partition.name, help: help)); let entry = try archive.entry(image)
                 try require(entry.size <= part.size && entry.size % 4096 == 0, "Linux image exceeds its partition or is not aligned to 4 KiB")
                 let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: "/dev/r" + part.name)); defer { try? handle.close() }
-                try archive.stream(entry, progress: { self.events(InstallEvent(.systemImage, fraction: $0, detail: partition.name)) }) { try handle.write(contentsOf: $0) }
+                try archive.stream(entry, progress: { self.events(InstallEvent(.systemImage, fraction: $0, detail: partition.name, help: help)) }) { try handle.write(contentsOf: $0) }
                 try handle.synchronize()
             }
             if let source = partition.source, let archive {
@@ -247,11 +263,11 @@ public actor InstallerEngine {
         if configuration.demo { return Stage2Status(name: "Gravity Linux", ready: true, in1TR: true, paired: true, complete: false, board: try demoBoard().presentation, boardProfileID: try demoBoard().id) }
         guard let url = configuration.stage2URL else { throw InstallerError("Pass --stage2 with the installed stage2.json path") }
         if geteuid() != 0 {
-            let context = try Stage2Context(url, boards: boards, developer: configuration.developer)
-            return Stage2Status(name: context.record.name, ready: context.record.ready, in1TR: false, paired: false, complete: context.record.complete, board: context.board.presentation, boardProfileID: context.board.id)
+            let context = try Stage2Context(url, boards: boards, developer: configuration.boardDeveloper)
+            return Stage2Status(name: context.record.name, ready: context.record.ready, in1TR: false, paired: false, complete: context.record.complete, board: context.board.presentation, boardProfileID: context.board.id, developerMode: context.record.developerMode == true)
         }
-        let context = try Stage2Context(url, boards: boards, developer: configuration.developer), policy = try context.status(commands: commands)
-        return Stage2Status(name: context.record.name, ready: context.record.ready, in1TR: MacSystem.environment(policy) == "one true recoveryOS", paired: policy.contains(": Paired"), complete: context.record.complete, board: context.board.presentation, boardProfileID: context.board.id)
+        let context = try Stage2Context(url, boards: boards, developer: configuration.boardDeveloper), policy = try context.status(commands: commands)
+        return Stage2Status(name: context.record.name, ready: context.record.ready, in1TR: MacSystem.environment(policy) == "one true recoveryOS", paired: policy.contains(": Paired"), complete: context.record.complete, board: context.board.presentation, boardProfileID: context.board.id, developerMode: context.record.developerMode == true)
     }
     public func finalize(credentials: Credentials) throws {
         if configuration.demo {
@@ -260,7 +276,7 @@ public actor InstallerEngine {
         try root(); guard let url = configuration.stage2URL else { throw InstallerError("No stage2 configuration") }
         let lock = try MutationLock(); defer { withExtendedLifetime(lock) {} }
         let power = PowerAssertion(); defer { withExtendedLifetime(power) {} }
-        try Stage2Context(url, boards: boards, developer: configuration.developer).finalize(commands: commands, credentials: credentials, events: events)
+        try Stage2Context(url, boards: boards, developer: configuration.boardDeveloper).finalize(commands: commands, credentials: credentials, events: events)
     }
     public func powerOff(restart: Bool) throws {
         if configuration.demo { return }; try root()
@@ -268,24 +284,27 @@ public actor InstallerEngine {
         _ = try commands.run("/sbin/shutdown", [restart ? "-r" : "-h", "now"], input: nil)
     }
     private func demoBoard() throws -> BoardProfile {
-        if let board = boards.availableProfiles(developer: configuration.developer).first { return board }
+        if let board = boards.availableProfiles(developer: configuration.boardDeveloper).first { return board }
         guard let board = boards.profiles.first else { throw InstallerError("No boards are registered") }
-        return try boards.profile(id: board.id, developer: configuration.developer)
+        return try boards.profile(id: board.id, developer: configuration.boardDeveloper)
     }
     private func demoInspection() throws -> Inspection {
         let board = try demoBoard()
-        return Inspection(model: board.presentation.productNumber, bootMode: "macOS", administrator: "demo", administrators: ["demo"],
-            targets: [StorageTarget(id: "demo-storage", name: "Macintosh HD", kind: "resize", totalBytes: 494_000_000_000, freeBytes: 300_000_000_000, maximumBytes: 260_000_000_000)],
-            software: ["KDE Plasma", "GNOME", "Sway", "Minimal", "UEFI only"].enumerated().map {
+        var software = ["KDE Plasma", "GNOME", "Sway", "Minimal", "UEFI only"].enumerated().map {
                 Software(id: "demo-\($0.offset)", name: $0.element, minimumBytes: $0.offset == 4 ? board.storage.stubBytes + alignUp(500_000_000) : board.storage.minimumLinuxBytes,
                          recommendedBytes: board.storage.minimumLinuxBytes, developer: false, mode: $0.offset == 4 ? .uefi : .linux)
-            }.filter { board.installationModes.contains($0.mode) }, existing: [], board: board.presentation, boardProfileID: board.id, macOSReserveBytes: board.storage.macOSReserveBytes)
+            }.filter { board.installationModes.contains($0.mode) }
+        if configuration.developer { software.append(try SoftwareTemplate.bootloaderOnly.software(id: "demo-bootloader", storage: board.storage)) }
+        return Inspection(model: board.presentation.productNumber, bootMode: "macOS", administrator: "demo", administrators: ["demo"],
+            targets: [StorageTarget(id: "demo-storage", name: "Macintosh HD", kind: "resize", totalBytes: 494_000_000_000, freeBytes: 352_000_000_000, maximumBytes: 312_000_000_000)],
+            software: software, existing: [], board: board.presentation, boardProfileID: board.id, macOSReserveBytes: board.storage.macOSReserveBytes)
     }
 }
 public struct Stage2Status: Codable, Sendable {
     public let name: String, ready: Bool, in1TR: Bool, paired: Bool, complete: Bool
     public var board: BoardPresentation? = nil
     public var boardProfileID: String? = nil
+    public var developerMode: Bool = false
 }
 public struct MaintenancePlan: Codable, Identifiable, Sendable {
     public let id: String, installationID: String, operation: String, changes: [String]
@@ -298,7 +317,7 @@ extension InstallerEngine {
     /// A new privileged process reconstructs the plan; a GUI-created plan ID
     /// cannot grant authority or bypass changed-layout and review checks.
     public func installReviewed(_ reviewed: InstallPlan, credentials: Credentials) throws {
-        try root(); _ = try inspect()
+        try root(); _ = try inspect(); _ = try availableSoftware()
         let fresh = try plan(reviewed.selection)
         try require(fresh.hasSameReview(as: reviewed), "The installation plan changed after review. Review it again before installing.")
         try install(planID: fresh.id, credentials: credentials)
@@ -377,8 +396,8 @@ extension InstallerEngine {
         let recordURL = os.resources.appending("stage2.json")
         var record: Stage2Record
         if let saved = try? JSONDecoder().decode(Stage2Record.self, from: Data(contentsOf: recordURL)) {
-            _ = try boards.savedProfile(id: saved.boardProfileID, hardware: saved.hardware, developer: configuration.developer)
-            try require(saved.boardProfileID == nil ? boards.savedProfile(id: nil, developer: configuration.developer).id == scan.board.id : saved.boardProfileID == scan.board.id, "Installed board profile does not match this Mac")
+            _ = try boards.savedProfile(id: saved.boardProfileID, hardware: saved.hardware, developer: configuration.boardDeveloper)
+            try require(saved.boardProfileID == nil ? boards.savedProfile(id: nil, developer: configuration.boardDeveloper).id == scan.board.id : saved.boardProfileID == scan.board.id, "Installed board profile does not match this Mac")
             record = saved
         } else {
             // Upgrade the legacy recovery launcher to this same native app,
@@ -402,9 +421,9 @@ extension InstallerEngine {
     public func collectHandoffBundle(destination: URL, ipsw: URL? = nil) throws {
         try require(!configuration.demo, "Firmware collection requires real hardware")
         try HandoffBundle.collect(destination: destination, ipsw: ipsw,
-            resources: configuration.resourceDirectory, boards: boards, developer: configuration.developer, commands: commands, events: events)
+            resources: configuration.resourceDirectory, boards: boards, developer: configuration.boardDeveloper, commands: commands, events: events)
     }
     public func rebuildFirmware(source: URL, destination: URL, boardID: String? = nil) throws {
-        try FirmwarePipeline.rebuild(source: source, destination: destination, resources: configuration.resourceDirectory, boardID: boardID, registry: boards, developer: configuration.developer, commands: commands, events: events)
+        try FirmwarePipeline.rebuild(source: source, destination: destination, resources: configuration.resourceDirectory, boardID: boardID, registry: boards, developer: configuration.boardDeveloper, commands: commands, events: events)
     }
 }

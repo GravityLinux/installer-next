@@ -5,7 +5,7 @@ import Testing
 
 @Test func reviewedPlanMatchesAcrossProcessesButRejectsChangedIntentOrDisk() async throws {
     let engine = InstallerEngine(configuration: EngineConfiguration(resourceDirectory: URL(fileURLWithPath: "/unused"), demo: true))
-    let info = try await engine.inspect()
+    var info = try await engine.inspect(); info.software = try await engine.availableSoftware()
     let selection = InstallSelection(targetID: info.targets[0].id, softwareID: info.software[0].id, bytes: 120_000_000_000)
     var reviewed = try await engine.plan(selection)
     reviewed.fingerprint = "reviewed-disk"
@@ -29,7 +29,7 @@ import Testing
 
 @Test func privilegedCommitRejectsChangedReviewBeforeStartingInstallation() async throws {
     let engine = InstallerEngine(configuration: EngineConfiguration(resourceDirectory: URL(fileURLWithPath: "/unused"), demo: true))
-    let info = try await engine.inspect()
+    var info = try await engine.inspect(); info.software = try await engine.availableSoftware()
     var plan = try await engine.plan(InstallSelection(targetID: info.targets[0].id, softwareID: info.software[0].id, bytes: 120_000_000_000))
     plan.fingerprint = "changed-after-review"
     await #expect(throws: (any Error).self) {

@@ -12,6 +12,7 @@ private final class ReadOnlyInspectionCommands: CommandRunning, @unchecked Senda
     let root: URL
     let group = "00000000-1111-2222-3333-444444444444"
     var calls: [(String, [String])] = []
+    var capacityFree: Int64 = 200_000_000_000
     init(root: URL) { self.root = root }
     func run(_ executable: String, _ arguments: [String], input: Data?) throws -> Data {
         calls.append((executable, arguments))
@@ -34,7 +35,7 @@ private final class ReadOnlyInspectionCommands: CommandRunning, @unchecked Senda
                     "Partitions": [["DeviceIdentifier": "disk0s1", "Content": "Apple_APFS_ISC"], ["DeviceIdentifier": "disk0s2", "Content": "Apple_APFS"]]]]]
             case ["apfs", "list", "-plist"]:
                 value = ["Containers": [["ContainerReference": "disk3", "DesignatedPhysicalStore": "disk0s2", "CapacityCeiling": 500_000_000_000,
-                    "CapacityFree": 200_000_000_000, "Volumes": [system, data, preboot, recovery]]]]
+                    "CapacityFree": capacityFree, "Volumes": [system, data, preboot, recovery]]]]
             case ["apfs", "listVolumeGroups", "disk3", "-plist"]:
                 value = ["Containers": [["VolumeGroups": [["APFSVolumeGroupUUID": group, "Volumes": [["DeviceIdentifier": "disk3s1", "Role": "System"], ["DeviceIdentifier": "disk3s2", "Role": "Data"]]]]]]]
             case ["apfs", "resizeContainer", "disk0s2", "limits", "-plist"]: value = ["MinimumSizePreferred": 300_000_000_000]
@@ -60,11 +61,19 @@ private final class ReadOnlyInspectionCommands: CommandRunning, @unchecked Senda
     let profile = BoardProfile(id: "testreadonly", deviceClass: "testreadonlyap", chipID: 0xf001, minimumMacOS: "1.0",
         restore: RestoreProfile(version: "1.0", url: URL(fileURLWithPath: "/unused.ipsw"), member: "unused.dmg", decodedSHA256: String(repeating: "0", count: 64), encoding: .dmg),
         firmwareMachine: "testreadonly", firmware: UnusedFirmware(), presentation: BoardPresentation(status: "Test", notes: "", powerButtonHelp: ""))
-    let catalog = temp.url.appending("images.json"); try write(Data("{\"os_list\":[]}".utf8), to: catalog)
-    let engine = InstallerEngine(configuration: EngineConfiguration(resourceDirectory: temp.url, catalogURL: catalog), commands: commands, boards: try BoardRegistry(profiles: [profile]))
+    let catalog = temp.url.appending("images.json")
+    var config = EngineConfiguration(resourceDirectory: temp.url, catalogURL: catalog); config.developer = true
+    let engine = InstallerEngine(configuration: config, commands: commands, boards: try BoardRegistry(profiles: [profile]))
     let info = try await engine.inspect(), target = try #require(info.targets.first)
-    #expect(info.administrator == "testadmin" && info.software.count == 1)
-    let plan = try await engine.plan(InstallSelection(targetID: target.id, softwareID: info.software[0].id, bytes: 5_000_000_000))
+    #expect(info.administrator == "testadmin" && info.software.isEmpty)
+    #expect(!fm.fileExists(atPath: catalog.path)) // Startup cannot have queried this missing source.
+    try write(Data("{\"os_list\":[]}".utf8), to: catalog)
+    let choices = try await engine.availableSoftware()
+    let plan = try await engine.plan(InstallSelection(targetID: target.id, softwareID: choices[0].id, bytes: 5_000_000_000))
     #expect(plan.fingerprint != nil && plan.software.mode == .bootloader)
     #expect(!commands.calls.contains { $0.0.hasSuffix("bputil") || $0.1.first == "mount" })
+    commands.capacityFree = 5_000_000_000
+    let constrained = try await engine.inspect()
+    let resize = try #require(constrained.targets.first { $0.kind == "resize" })
+    #expect(resize.maximumBytes == 0 && resize.unavailableReason?.contains("40 GB") == true)
 }

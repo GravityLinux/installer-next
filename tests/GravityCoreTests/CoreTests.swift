@@ -191,7 +191,7 @@ func stage2Fixture(_ temp: TemporaryDirectory) throws -> URL {
 }
 @Test func demoPlansValidateBoundsAndCannotBeReused() async throws {
     var config = EngineConfiguration(resourceDirectory: URL(fileURLWithPath: "/does-not-exist")); config.demo = true
-    let engine = InstallerEngine(configuration: config), inspection = try await engine.inspect()
+    let engine = InstallerEngine(configuration: config); var inspection = try await engine.inspect(); inspection.software = try await engine.availableSoftware()
     let target = try #require(inspection.targets.first), software = try #require(inspection.software.first)
     let plan = try await engine.plan(InstallSelection(targetID: target.id, softwareID: software.id, bytes: 120_000_000_000))
     #expect(plan.macOSAfterBytes! >= target.totalBytes - target.maximumBytes)
@@ -269,7 +269,7 @@ final class PartitionCommands: CommandRunning, @unchecked Sendable {
 }
 @Test func uefiPlanReservesFutureSpaceWithoutGrowingESP() async throws {
     let engine = InstallerEngine(configuration: EngineConfiguration(resourceDirectory: URL(fileURLWithPath: "/no-assets"), demo: true))
-    let info = try await engine.inspect(), target = try #require(info.targets.first), uefi = try #require(info.software.first { $0.mode == .uefi })
+    var info = try await engine.inspect(); info.software = try await engine.availableSoftware(); let target = try #require(info.targets.first), uefi = try #require(info.software.first { $0.mode == .uefi })
     let plan = try await engine.plan(InstallSelection(targetID: target.id, softwareID: uefi.id, bytes: 120_000_000_000))
     #expect(plan.selection.bytes > 119_000_000_000)
     #expect(plan.changes.contains { $0.contains("unallocated for a future operating system") })

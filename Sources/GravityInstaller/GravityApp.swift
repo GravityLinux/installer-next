@@ -16,8 +16,8 @@ import GravityCore
     @StateObject var model = InstallerModel()
     var body: some Scene {
         Window("Install Gravity Linux", id: "installer") {
-            InstallerView(model: model).preferredColorScheme(.light)
-                .frame(minWidth: 880, minHeight: 556)
+            InstallerView(model: model).frame(minWidth: 880, minHeight: 600)
+                .background(InstallerWindowStyle()).ignoresSafeArea()
                 .onAppear { delegate.model = model; NSApp.activate(ignoringOtherApps: true) }
                 .task {
                     await model.load()
@@ -26,252 +26,490 @@ import GravityCore
                         catch { FileHandle.standardError.write(Data((error.localizedDescription + "\n").utf8)); exit(1) }
                     }
                 }
-        }.defaultSize(width: 880, height: 556).windowResizability(.contentMinSize)
+        }.defaultSize(width: 880, height: 600).windowStyle(.hiddenTitleBar).windowResizability(.contentMinSize)
         .commands {
             CommandGroup(after: .appInfo) {
                 Button("Developer Options…") { model.developerSheet = true }.keyboardShortcut("d", modifiers: [.option, .command]).disabled(model.busy)
             }
             CommandGroup(replacing: .help) { Link("1TR entry guide", destination: GuideLinks.recovery); Link("How we keep your Mac safe", destination: GuideLinks.safety) }
         }
+        Window("Developer Options", id: "developer-options") {
+            DeveloperOptionsView(model: model).background(InstallerWindowStyle()).ignoresSafeArea()
+        }.windowStyle(.hiddenTitleBar).windowResizability(.contentSize)
     }
 }
+private typealias T = InstallerTheme
 
-private let ink = Color(red: 0.114, green: 0.114, blue: 0.122)
-private let muted = Color(red: 0.431, green: 0.431, blue: 0.451)
-private let surface = Color(red: 0.961, green: 0.961, blue: 0.969)
-private let accent = Color(red: 0, green: 0.4, blue: 0.8)
-private let hairline = Color(red: 0.824, green: 0.824, blue: 0.843)
 @MainActor struct InstallerView: View {
     @ObservedObject var model: InstallerModel
+    @Environment(\.openWindow) private var openWindow
     var body: some View {
-        HStack(spacing: 0) {
-            sidebar
+        ZStack(alignment: .top) {
             VStack(spacing: 0) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 24) { content }.padding(.horizontal, 48).padding(.top, 36).padding(.bottom, 24).frame(maxWidth: .infinity, alignment: .leading)
+                InstallerTitleBar(developer: model.developer, preview: model.renderingPreview)
+                HStack(spacing: 0) {
+                    sidebar
+                    VStack(spacing: 0) {
+                        GeometryReader { geometry in
+                            ScrollView(showsIndicators: false) {
+                                InstallerPageLayout(minimumHeight: max(0, geometry.size.height - topPadding - bottomPadding)) { content }
+                                    .padding(.horizontal, horizontalPadding).padding(.top, topPadding).padding(.bottom, bottomPadding)
+                            }.scrollIndicators(.hidden)
+                        }
+                        footer
+                    }.background(.white)
                 }
-                footer
-            }.background(.white)
-        }.foregroundStyle(ink).font(.system(size: 14)).tint(accent)
-        .sheet(isPresented: $model.safety) { safetySheet }
-        .sheet(isPresented: $model.credentialsSheet, onDismiss: { model.password = "" }) { authenticationSheet }
-        .sheet(isPresented: $model.developerSheet) { developerSheet }
+            }
+            if model.safety || model.credentialsSheet {
+                T.ink.opacity(0.22).padding(.top, 44).ignoresSafeArea(edges: .bottom).onTapGesture {}
+                if model.safety { safetySheet.padding(.top, 44) }
+                else { authenticationSheet.padding(.top, 44) }
+            }
+        }.foregroundStyle(T.ink).font(T.font(14)).tint(T.accent).background(.white).preferredColorScheme(.light)
+        .onChange(of: model.developerSheet) { open in if open { openWindow(id: "developer-options"); model.developerSheet = false } }
+        .onExitCommand { if model.credentialsSheet { model.credentialsSheet = false; model.password = "" }; model.safety = false }
         .alert("Gravity Linux Installer", isPresented: Binding(get: { model.error != nil && model.screen != .failure }, set: { if !$0 { model.error = nil } })) {
             Button("OK") { model.error = nil }
         } message: { Text(model.error ?? "") }
     }
+    private var horizontalPadding: CGFloat { [.installing, .finalize, .complete].contains(model.screen) ? 72 : model.screen == .restart ? 48 : 56 }
+    private var topPadding: CGFloat { model.screen == .software ? 36 : model.screen == .restart ? 34 : 40 }
+    private var bottomPadding: CGFloat { model.screen == .restart ? 12 : model.screen == .storage && (model.inspection?.targets.count ?? 0) > 1 ? 16 : model.screen == .software ? 20 : 24 }
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 30) {
-            Text("gravity").font(.system(size: 21, weight: .semibold)).tracking(-0.5)
-            VStack(alignment: .leading, spacing: 16) {
-                ForEach(Array(["Welcome", "Partition", "Choose a desktop", "Review", "Install", "Restart", "Finish"].enumerated()), id: \.offset) { i, name in
+        VStack(alignment: .leading, spacing: 32) {
+            Text("gravity").font(T.font(20, .semibold)).tracking(-0.2)
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(Array(["Welcome", "Partition", "Desktop", "Review", "Install", "Restart", "Finish"].enumerated()), id: \.offset) { i, name in
                     HStack(spacing: 10) {
-                        Circle().fill(i == model.active ? accent : i < model.active ? Color.gray : .clear).overlay(Circle().stroke(i > model.active ? Color.gray : .clear, lineWidth: 1.3)).frame(width: 8, height: 8)
-                        Text(name).fontWeight(i == model.active ? .semibold : .regular).foregroundStyle(i == model.active ? ink : muted)
-                    }.font(.system(size: 13)).accessibilityLabel("\(name), \(i == model.active ? "current step" : i < model.active ? "completed" : "upcoming")")
+                        ZStack {
+                            Circle().stroke(T.border, lineWidth: 1.5).frame(width: 7, height: 7)
+                            if i <= model.active { Circle().fill(i == model.active ? T.accent : T.border).frame(width: i == model.active ? 9 : 7, height: i == model.active ? 9 : 7) }
+                        }.frame(width: 11, height: 16)
+                        Text(name).font(T.font(13, i == model.active ? .semibold : .regular)).foregroundStyle(i <= model.active ? T.ink : T.muted)
+                    }.frame(height: 16).accessibilityLabel("\(name), \(i == model.active ? "current step" : i < model.active ? "completed" : "upcoming")")
                 }
             }
-            if model.launch.configuration.demo { Label("Demo · no disk changes", systemImage: "eye").font(.caption).foregroundStyle(.orange) }
-            if model.developer { Text("Developer mode").font(.system(size: 12, design: .monospaced)).foregroundStyle(.orange) }
-            Spacer()
+            Spacer(minLength: 0)
             Button { model.safety = true } label: {
                 HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "checkmark.shield").foregroundStyle(.green)
-                    VStack(alignment: .leading, spacing: 2) { Text("macOS stays untouched").fontWeight(.medium); Text("How we keep your Mac safe").foregroundStyle(muted) }.font(.system(size: 11))
+                    Image(systemName: "checkmark.shield").font(.system(size: 16, weight: .regular)).foregroundStyle(T.green).frame(width: 16)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("macOS stays untouched").font(T.font(12, .medium)).foregroundStyle(T.ink)
+                        Text("How we keep your Mac safe").font(T.font(12)).foregroundStyle(T.muted)
+                    }.lineSpacing(1)
                 }.multilineTextAlignment(.leading)
             }.buttonStyle(.plain)
-        }.padding(24).frame(width: 216).frame(maxHeight: .infinity).background(surface)
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 24).padding(.top, 28).padding(.bottom, 24).frame(width: 216).background(T.surface)
     }
     @ViewBuilder private var content: some View {
         switch model.screen {
         case .checking:
-            VStack(spacing: 18) { ProgressView(); Text("Gathering Info").font(.system(size: 17, weight: .medium)); Text(model.progress.title).foregroundStyle(muted) }.frame(maxWidth: .infinity).padding(.top, 150)
+            VStack { Spacer(minLength: 0); VStack(spacing: 20) { ProgressView().controlSize(.large); Text("Gathering Info").font(T.font(28, .semibold)) }.frame(maxWidth: .infinity); Spacer(minLength: 0) }
+        case .welcome: welcome
+        case .storage: storage
+        case .software: software
+        case .review: review
+        case .installing: installation
+        case .restart: restart
+        case .finalize: finalize
+        case .complete: complete
+        case .existing: existing
         case .unsupported:
-            if let issue = model.supportIssue {
-                Image(systemName: issue.reason == .developerRequired ? "wrench.and.screwdriver" : "desktopcomputer.trianglebadge.exclamationmark").font(.system(size: 36)).foregroundStyle(muted)
-                heading(issue.title, "Board \(issue.productNumber)")
-                Text(issue.errorDescription ?? "").foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
-                if !issue.supportedBoards.isEmpty {
-                    info("Available boards: " + issue.supportedBoards.joined(separator: ", "), icon: "cpu")
-                }
-                info("This check hasn’t changed your disk.", icon: "lock.shield")
-            }
-        case .welcome:
-            heading("Install Gravity Linux on your Mac", "Gravity Linux runs alongside macOS in a dual boot configuration.")
-            HStack(spacing: 16) {
-                Image(systemName: model.board?.symbol ?? "desktopcomputer").font(.system(size: 28)); VStack(alignment: .leading, spacing: 5) { Text(model.board?.productNumber ?? model.inspection?.model ?? "This Mac").fontWeight(.medium); Text(model.board?.notes ?? "").font(.system(size: 12)).foregroundStyle(muted) }; Spacer(); Text(model.board?.status ?? "").font(.system(size: 12, design: .monospaced)).foregroundStyle(.orange)
-            }.padding(18).background(surface, in: RoundedRectangle(cornerRadius: 12))
-            VStack(alignment: .leading, spacing: 16) {
-                Text("Before you begin").font(.system(size: 13, weight: .semibold))
-                Label("Keep your Mac connected to power", systemImage: "powerplug")
-                Label("Stay online to download Linux and Apple firmware", systemImage: "wifi")
-                Label("Set aside time for installation and one restart", systemImage: "clock")
-            }
-        case .storage:
-            heading("How much space for Gravity Linux?", model.target?.kind == "free" ? "Use existing unallocated space for Gravity Linux." : "Shrink your macOS partition to make space for Gravity Linux.")
-            if (model.inspection?.targets.count ?? 0) > 1 {
-                Picker("Storage", selection: $model.targetID) { ForEach(model.inspection?.targets ?? []) { Text($0.name).tag($0.id) } }.onChange(of: model.targetID) { _ in model.clampSize() }
-            }
-            if let target = model.target, model.maximumGB >= model.minimumGB {
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack { Text(target.name).fontWeight(.medium); Spacer(); Text(sizeText(target.totalBytes)).foregroundStyle(muted) }
-                    partitionBar(total: target.totalBytes, linux: Int64(model.sizeGB * 1e9))
-                    HStack { Text(target.kind == "free" ? "Unallocated" : "macOS"); Spacer(); Text("Gravity Linux").foregroundStyle(accent) }.font(.system(size: 12))
-                    HStack {
-                        Text("Partition size").font(.system(size: 13)); Spacer()
-                        TextField("Size", value: $model.sizeGB, format: .number.precision(.fractionLength(0))).multilineTextAlignment(.trailing).frame(width: 64).onSubmit { model.clampSize() }; Text("GB")
-                    }
-                    Slider(value: $model.sizeGB, in: model.minimumGB...max(model.minimumGB + 0.001, model.maximumGB), step: 1).accessibilityLabel("Space for Gravity Linux")
-                    Text("At least \(sizeText(model.software?.minimumBytes ?? 30_000_000_000)). We always leave macOS \(sizeText(model.inspection?.macOSReserveBytes ?? 40_000_000_000)) free so it can keep updating.").font(.system(size: 12)).foregroundStyle(muted)
-                }.padding(20).background(surface, in: RoundedRectangle(cornerRadius: 12))
-            } else { info("There isn’t enough available space. Free space in macOS or review your APFS snapshots, then check this Mac again.", icon: "externaldrive.badge.exclamationmark") }
-            info("Nothing on your disk changes yet. You’ll review every change before anything happens.", icon: "lock")
-        case .software:
-            heading("Choose your desktop", "Pick a desktop environment, or go without one.")
-            let desktops = (model.inspection?.software ?? []).filter { ["kde", "plasma", "gnome", "sway"].contains(where: $0.name.lowercased().contains) }
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 14) {
-                ForEach(desktops) { software in softwareCard(software) }
-            }
-            VStack(spacing: 0) {
-                ForEach((model.inspection?.software ?? []).filter { item in !desktops.contains(where: { $0.id == item.id }) }) { software in
-                    Button { model.softwareID = software.id; model.clampSize() } label: {
-                        HStack(spacing: 12) { radio(software.id); Image(systemName: software.name.lowercased().contains("uefi") ? "cpu" : "terminal"); Text(software.name).fontWeight(.medium); Spacer(); if software.developer { Text("Developer").font(.caption).foregroundStyle(.orange) } }.padding(.vertical, 14).padding(.horizontal, 8)
-                    }.buttonStyle(.plain); Divider()
+            VStack(alignment: .leading, spacing: 28) {
+                if let issue = model.supportIssue {
+                    Image(systemName: issue.reason == .developerRequired ? "wrench.and.screwdriver" : "desktopcomputer.trianglebadge.exclamationmark").font(.system(size: 36)).foregroundStyle(T.muted)
+                    heading(issue.title, "Board \(issue.productNumber)")
+                    Text(issue.errorDescription ?? "").foregroundStyle(T.muted).fixedSize(horizontal: false, vertical: true)
+                    if !issue.supportedBoards.isEmpty { note("Available boards: " + issue.supportedBoards.joined(separator: ", "), icon: "cpu") }
+                    note("This check hasn’t changed your disk.", icon: "lock.shield")
                 }
             }
-        case .review:
-            heading(model.maintenance?.operation == "uninstall" ? "Review and uninstall" : "Review and install", "This is everything that will happen. Review these changes before continuing.")
-            if let plan = model.plan {
-                partitionBar(total: plan.target.totalBytes, linux: plan.selection.bytes)
-                VStack(alignment: .leading, spacing: 20) { ForEach(plan.changes, id: \.self) { Label($0, systemImage: "checkmark").labelStyle(.titleAndIcon) } }
-                TextField("Startup volume name", text: .constant(plan.selection.name)).disabled(true)
-            }
-            if let maintenance = model.maintenance { ForEach(maintenance.changes, id: \.self) { Label($0, systemImage: maintenance.operation == "uninstall" ? "exclamationmark.triangle" : "checkmark") } }
-            Text("Continuing starts the changes above. You’ll be asked for your Mac’s administrator password.").font(.system(size: 13)).foregroundStyle(muted)
-        case .installing:
-            VStack(alignment: .leading, spacing: 22) {
-                Text(model.progress.title).font(.system(size: 24, weight: .semibold))
-                if let fraction = model.progress.fraction { ProgressView(value: fraction).progressViewStyle(.linear) } else { ProgressView().progressViewStyle(.linear) }
-                HStack { Text(model.progress.detail ?? model.progress.title); Spacer(); if let n = model.progress.fraction { Text("\(Int(n * 100))%").monospacedDigit() } }.font(.system(size: 12)).foregroundStyle(muted)
-                Text(model.progress.help).font(.system(size: 14)).foregroundStyle(muted).fixedSize(horizontal: false, vertical: true)
-                DisclosureGroup("Show details", isExpanded: $model.showDetails) { ScrollView { Text(model.details.joined(separator: "\n")).font(.system(size: 11, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }.frame(height: 130).padding(.top, 8) }
-            }.padding(.top, 80)
-        case .restart:
-            heading("One restart to finish", "Your Mac needs to start up in startup options, Apple’s built-in recovery mode, to finish installing.")
-            HStack(alignment: .top, spacing: 16) {
-                restartStep("power", "1", "Shut down", "Click Shut Down below.")
-                restartStep("20.circle", "2", "Wait 20 seconds", "Let your Mac fully power off.")
-                restartStep("hand.point.up.left", "3", "Hold the power button", "Keep holding until startup options appear.")
-                restartStep("externaldrive", "4", "Choose \(model.volumeName)", "Select it, then click Continue.")
-            }
-            if let help = model.board?.powerButtonHelp { info(help, icon: "info.circle") }
-            HStack(spacing: 14) {
-                QRCode(url: GuideLinks.recovery).frame(width: 72, height: 72)
-                VStack(alignment: .leading, spacing: 5) { Text("Your screen will go dark.").fontWeight(.medium); Text("Scan to keep these steps on your phone, or open the 1TR entry guide.").foregroundStyle(muted); Link(GuideLinks.recovery.absoluteString, destination: GuideLinks.recovery).font(.system(size: 12)) }.font(.system(size: 12))
-            }
-        case .finalize:
-            if let status = model.stage2, !status.in1TR || !status.paired {
-                heading("Start up in recovery to finish", status.paired ? "Hold the power button continuously from power off until startup options appear." : "Choose the recovery environment paired with \(status.name).")
-                info("Wait the full 20 seconds after shutting down. Keep holding your Mac’s power button past the logo, until “Loading startup options” appears.", icon: "power")
-                Link("Open the 1TR entry guide", destination: GuideLinks.recovery)
-            } else {
-                Label("You’re in startup options", systemImage: "checkmark.circle.fill").font(.system(size: 12)).foregroundStyle(.green)
-                heading("Finish installing Gravity Linux", "One last step adds Gravity Linux to your Mac’s startup options.")
-                info("You’ll need the username and password of a macOS administrator. Apple requires them to change startup options. macOS keeps its existing security setting.", icon: "lock.shield")
-            }
-        case .complete:
-            VStack(spacing: 16) { Image(systemName: "checkmark.circle").font(.system(size: 48)).foregroundStyle(.green); heading("Gravity Linux is installed", "Your Mac will restart into Gravity Linux.") }.frame(maxWidth: .infinity).padding(.top, 48)
-            info("Want to start up in macOS instead? Shut down, hold the power button until startup options appear, and choose Macintosh HD.", icon: "arrow.triangle.branch")
-            if let note = model.board?.postInstallNote { info(note, icon: "moon.zzz") }
-        case .existing:
-            heading("Gravity Linux is already on this Mac", "Choose an installation to repair, update, or remove.")
-            if (model.inspection?.existing.count ?? 0) > 1 { Picker("Installation", selection: $model.selectedExisting) { ForEach(model.inspection?.existing ?? []) { Text($0.name).tag($0.id) } } }
-            existingAction("Repair", "Fix startup problems. Your Linux files and settings are kept.", icon: "wrench.and.screwdriver", operation: "repair")
-            existingAction("Upgrade firmware", "Update m1n1 stage 1, preserving the installed boot variables.", icon: "cpu", operation: "upgrade")
-            existingAction("Uninstall", "Remove Gravity Linux and give its space back to macOS.", icon: "trash", operation: "uninstall").disabled(model.inspection?.existing.first(where: { $0.id == model.selectedExisting })?.canUninstall != true)
         case .failure:
-            heading(model.failureTitle, model.error ?? "An unexpected error occurred.")
-            if model.changesMayHaveStarted { info("Disk changes may have started. Keep the error details; a completed first stage can be resumed using Repair.", icon: "exclamationmark.triangle") }
-            if !model.details.isEmpty { Text(model.details.joined(separator: "\n")).font(.system(size: 11, design: .monospaced)).textSelection(.enabled) }
+            VStack(alignment: .leading, spacing: 28) {
+                heading(model.failureTitle, model.error ?? "An unexpected error occurred.")
+                if model.changesMayHaveStarted { note("Disk changes may have started. Keep the error details; a completed first stage can be resumed using Repair.", icon: "exclamationmark.triangle") }
+                if !model.details.isEmpty { Text(model.details.joined(separator: "\n")).font(T.mono(11)).textSelection(.enabled) }
+            }
         case .removed:
             heading("Gravity Linux was removed", "macOS is the default startup volume again. The adjacent free space has been returned to macOS.")
         }
     }
-    private func heading(_ title: String, _ subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) { Text(title).font(.system(size: 24, weight: .semibold)).tracking(-0.4); Text(subtitle).font(.system(size: 14)).foregroundStyle(muted).lineSpacing(3) }.fixedSize(horizontal: false, vertical: true)
+    private var welcome: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            heading("Install Gravity Linux on your Mac", "Gravity Linux runs alongside macOS. You choose which one to start each time you turn on your Mac.", subtitleWidth: 460)
+            HStack(spacing: 16) {
+                Image(systemName: model.board?.symbol ?? "desktopcomputer").font(.system(size: 28)).frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.board?.productNumber ?? model.inspection?.model ?? "This Mac").font(T.font(15, .medium))
+                    Text(model.board?.notes ?? "").font(T.font(13)).foregroundStyle(T.muted).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Text(model.board?.status ?? "").font(T.mono(12, .medium)).foregroundStyle(T.amber)
+            }.padding(.vertical, 16).padding(.horizontal, 20).background(T.surface, in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Before you begin").font(T.font(13, .semibold))
+                VStack(alignment: .leading, spacing: 12) {
+                    instruction("Keep your Mac connected to power", icon: "powerplug")
+                    instruction("Stay online to download Linux and Apple firmware", icon: "wifi")
+                    instruction("Set aside time for installation and one restart", icon: "stopwatch")
+                }
+            }
+            Spacer(minLength: 0)
+        }
     }
-    private func info(_ text: String, icon: String) -> some View { HStack(alignment: .top, spacing: 12) { Image(systemName: icon).foregroundStyle(muted); Text(text).font(.system(size: 13)).lineSpacing(3) }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(surface, in: RoundedRectangle(cornerRadius: 12)) }
-    private func partitionBar(total: Int64, linux: Int64) -> some View {
-        GeometryReader { geometry in HStack(spacing: 3) { RoundedRectangle(cornerRadius: 5).fill(Color.gray.opacity(0.3)); RoundedRectangle(cornerRadius: 5).fill(accent).frame(width: max(1, geometry.size.width * min(1, Double(linux) / Double(max(1, total))))) } }.frame(height: 64).accessibilityLabel("Gravity Linux, \(sizeText(linux))")
+    private var storage: some View {
+        VStack(alignment: .leading, spacing: (model.inspection?.targets.count ?? 0) > 1 ? 16 : 28) {
+            heading("How much space for Gravity Linux?", model.target?.kind == "free" ? "Use existing unallocated space for Gravity Linux." : "Shrink your macOS partition to make space for Gravity Linux.")
+            if (model.inspection?.targets.count ?? 0) > 1 { storageChoices }
+            if let target = model.target, model.maximumGB >= model.minimumGB, target.unavailableReason == nil {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack { Text(target.name); Spacer(); Text(sizeText(target.totalBytes)) }.font(T.font(12)).foregroundStyle(T.muted)
+                    storageBar(target)
+                    HStack(spacing: 16) {
+                        Text("Partition size").font(T.font(13, .medium)).fixedSize()
+                        PartitionSizeSlider(value: $model.sizeGB, bounds: model.minimumGB...max(model.minimumGB, model.maximumGB))
+                        Text("\(Int(model.sizeGB)) GB").font(T.mono(13)).frame(width: 64, alignment: .trailing)
+                    }.padding(.top, 10)
+                    Text(storageHelp).font(T.font(12)).foregroundStyle(T.muted).lineSpacing(2)
+                }
+            } else {
+                note(model.target?.unavailableReason ?? "There isn’t enough available space. Free space in macOS or review your APFS snapshots, then check this Mac again.", icon: "externaldrive.badge.exclamationmark")
+            }
+            Spacer(minLength: 0)
+            note("Nothing on your disk changes yet.", detail: "You’ll review every change before anything happens.", icon: "lock", inline: true)
+        }
     }
-    private func radio(_ id: String) -> some View { Image(systemName: model.softwareID == id ? "largecircle.fill.circle" : "circle").foregroundStyle(model.softwareID == id ? accent : muted) }
+    private var storageChoices: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(model.inspection?.targets ?? []) { target in
+                VStack(alignment: .leading, spacing: 3) {
+                    Button { model.targetID = target.id; model.clampSize() } label: {
+                        HStack(alignment: .top, spacing: 10) {
+                        radio(selected: model.targetID == target.id).padding(.top, 2)
+                            Text(target.kind == "resize" ? "Shrink macOS · \(target.name)" : "Use unallocated space · \(sizeText(target.totalBytes))").font(T.font(13, .medium))
+                        Spacer(minLength: 0)
+                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    }.buttonStyle(.plain).disabled(target.unavailableReason != nil)
+                    if let reason = target.unavailableReason { Text(reason).font(T.font(12)).foregroundStyle(T.muted).fixedSize(horizontal: false, vertical: true).padding(.leading, 25) }
+                }
+            }
+        }
+    }
+    private var storageHelp: String {
+        if model.target?.kind == "free" { return "At least \(Int(model.minimumGB)) GB. macOS keeps its current partition size." }
+        return "At least \(Int(model.minimumGB)) GB. We always leave macOS \(sizeText(model.inspection?.macOSReserveBytes ?? 40_000_000_000)) free so it can keep updating."
+    }
+    private func storageBar(_ target: StorageTarget) -> some View {
+        let linux = Int64(model.sizeGB * 1e9), left = max(0, target.totalBytes - linux)
+        let used = target.kind == "free" ? 0 : max(0, target.totalBytes - target.freeBytes)
+        return GeometryReader { g in
+            let width = max(0, g.size.width * CGFloat(left) / CGFloat(max(1, target.totalBytes)))
+            HStack(spacing: 6) {
+                ZStack(alignment: .leading) {
+                    T.surface
+                    T.hairline.frame(width: min(width, width * CGFloat(used) / CGFloat(max(1, left))))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(target.kind == "free" ? "Unallocated" : "macOS").font(T.font(14, .semibold))
+                        Text(target.kind == "free" ? sizeText(left) : "\(sizeText(left)) · \(sizeText(max(0, left-used))) free").font(T.font(12)).lineLimit(1)
+                    }.padding(.horizontal, 16)
+                }.frame(width: width).clipShape(PartitionSegment(leading: true))
+                Capsule().fill(T.border).frame(width: 4, height: 32).frame(height: 72)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Gravity Linux").font(T.font(14, .semibold)).lineLimit(1).minimumScaleFactor(0.85)
+                    Text(sizeText(linux)).font(T.font(12))
+                }.padding(.horizontal, 16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .foregroundStyle(.white).background(T.accent).clipShape(PartitionSegment(leading: false))
+            }
+        }.frame(height: 72).accessibilityElement(children: .combine)
+    }
+    private var software: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            heading("Choose your desktop", "Pick a desktop environment, or go without one.")
+            let desktops = (model.inspection?.software ?? []).filter { ["kde", "plasma", "gnome", "sway"].contains(where: $0.name.lowercased().contains) }
+            if !desktops.isEmpty {
+                HStack(alignment: .top, spacing: 14) { ForEach(desktops) { item in softwareCard(item) } }
+            }
+            VStack(spacing: 0) {
+                T.hairline.frame(height: 1)
+                ForEach((model.inspection?.software ?? []).filter { item in !desktops.contains(where: { $0.id == item.id }) }) { item in
+                    Button { model.softwareID = item.id; model.clampSize() } label: {
+                        HStack(spacing: 12) {
+                            radio(selected: model.softwareID == item.id)
+                            Image(systemName: item.mode == .uefi ? "square.3.layers.3d" : item.mode == .bootloader ? "chevron.left.forwardslash.chevron.right" : "terminal").frame(width: 18)
+                            Text(item.mode == .bootloader ? "Tethered boot" : shortName(item.name)).font(T.font(14, .medium))
+                            Text(item.mode == .bootloader ? "Bootloader only in a development configuration" : item.mode == .uefi ? "Just the startup firmware, to install another distribution" : "Command line only, no desktop").font(T.font(12)).foregroundStyle(T.muted).fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
+                            if item.developer || item.mode == .bootloader { Text("Developer").font(T.mono(12, .medium)).foregroundStyle(T.amber) }
+                        }.padding(.vertical, 12).padding(.horizontal, 8).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    }.buttonStyle(.plain).overlay(RoundedRectangle(cornerRadius: 8).stroke(model.softwareID == item.id ? T.accent : .clear, lineWidth: 2))
+                    T.hairline.frame(height: 1)
+                }
+            }
+            if model.busy { HStack(spacing: 10) { ProgressView().controlSize(.small); Text("Checking available images…").font(T.font(13)).foregroundStyle(T.muted) } }
+            else if (model.inspection?.software.isEmpty ?? true) { Text("No compatible images are currently available from the CDN for this board.").font(T.font(13)).foregroundStyle(T.muted) }
+            Spacer(minLength: 0)
+        }
+    }
+    private var review: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            heading(model.maintenance?.operation == "uninstall" ? "Review and uninstall" : "Review and install", "This is everything that will happen. Nothing has changed on your Mac so far.")
+            if let plan = model.plan {
+                GeometryReader { g in
+                    HStack(spacing: 4) {
+                        T.hairline.clipShape(RoundedRectangle(cornerRadius: 5)).frame(width: max(0, (g.size.width-4) * CGFloat(max(0, plan.target.totalBytes-plan.selection.bytes)) / CGFloat(max(1, plan.target.totalBytes))))
+                        T.accent.clipShape(RoundedRectangle(cornerRadius: 5))
+                    }
+                }.frame(height: 10)
+                VStack(spacing: 0) {
+                    T.hairline.frame(height: 1)
+                    reviewRow(plan.target.kind == "resize" ? "macOS" : "Storage",
+                        plan.macOSAfterBytes.map { "Shrinks from \(sizeText(plan.target.totalBytes)) to \(sizeText($0))" } ?? "Use existing unallocated space",
+                        detail: plan.target.kind == "resize" ? "Your files, apps and settings stay exactly as they are" : "macOS keeps its current partition size")
+                    reviewRow("Gravity Linux", "New \(sizeText(plan.selection.bytes)) space")
+                    reviewRow("Software", plan.software.name)
+                }
+                if plan.software.mode != .linux {
+                    Text(plan.changes.filter { $0.hasPrefix("Create only") || $0.hasPrefix("Leave ") }.joined(separator: ". ") + ".").font(T.font(12)).foregroundStyle(T.muted).lineSpacing(2)
+                }
+                if model.developer && model.developerOptions.bypassImageChecks { Text("Downloaded Linux image verification is disabled in Developer Options. Apple recovery and firmware verification remain enabled.").font(T.font(12)).foregroundStyle(T.amber) }
+            }
+            if let maintenance = model.maintenance {
+                VStack(spacing: 0) { ForEach(maintenance.changes, id: \.self) { reviewRow("Change", $0) } }
+            }
+            Spacer(minLength: 0)
+            Text("Clicking \(model.maintenance?.operation == "uninstall" ? "Uninstall" : "Install") starts the changes above. You’ll be asked for your Mac’s administrator password.").font(T.font(13)).foregroundStyle(T.muted).lineSpacing(2)
+        }
+    }
+    private func reviewRow(_ label: String, _ value: String, detail: String? = nil) -> some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 24) {
+                Text(label).foregroundStyle(T.muted).frame(width: 120, alignment: .leading)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(value).fixedSize(horizontal: false, vertical: true)
+                    if let detail { Text(detail).font(T.font(13)).foregroundStyle(T.muted).fixedSize(horizontal: false, vertical: true) }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }.font(T.font(14)).padding(.vertical, 14)
+            T.hairline.frame(height: 1)
+        }
+    }
+    private var installation: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            Spacer(minLength: 0)
+            Text(model.stage2 != nil ? "Finishing installation" : model.maintenance != nil ? model.progress.title : "Installing Gravity Linux").font(T.font(24, .semibold)).tracking(-0.24).fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 10) {
+                if let fraction = model.progress.fraction {
+                    GeometryReader { g in ZStack(alignment: .leading) { T.surface; T.accent.frame(width: g.size.width * fraction) } }.frame(height: 6).clipShape(Capsule())
+                } else { ProgressView().progressViewStyle(.linear).frame(height: 6) }
+                HStack { Text(model.progress.title + (model.progress.detail.map { " · " + $0 } ?? "")); Spacer(); if let n = model.progress.fraction { Text("\(Int(n*100))%").foregroundStyle(T.muted) } }.font(T.font(13))
+            }
+            Text(model.progress.help).font(T.font(13)).foregroundStyle(T.muted).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+            Button(model.showDetails ? "Hide details" : "Show details") { model.showDetails.toggle() }.buttonStyle(.plain).font(T.font(13)).foregroundStyle(T.accent)
+            if model.showDetails {
+                ScrollView { Text(model.details.joined(separator: "\n")).font(T.mono(12)).foregroundStyle(T.muted).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(12) }.frame(height: 130).background(T.surface, in: RoundedRectangle(cornerRadius: 12)).padding(.top, 12)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+    private var restart: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            heading("One restart to finish", "Your Mac needs to start up in startup options, Apple’s built-in recovery mode, to finish installing. It takes about a minute.")
+            HStack(alignment: .top, spacing: 14) {
+                restartStep(1, "Shut down", "Click Shut Down below.")
+                restartStep(2, "Wait 20 seconds", "Give your Mac time to fully power off.")
+                restartStep(3, "Hold the power button", "Keep holding until “Loading startup options” appears.")
+                restartStep(4, "Choose \(model.volumeName)", "Select it, then click Continue.")
+            }
+            if let help = model.board?.powerButtonHelp {
+                HStack(alignment: .top, spacing: 8) { Image(systemName: "info.circle").frame(width: 14); Text(help).fixedSize(horizontal: false, vertical: true) }.font(T.font(12)).foregroundStyle(T.muted)
+            }
+            HStack(spacing: 14) {
+                QRCode(url: GuideLinks.recovery).frame(width: 52, height: 52).padding(4).background(.white, in: RoundedRectangle(cornerRadius: 8))
+                VStack(alignment: .leading, spacing: 2) {
+                    (Text("Your screen will go dark. ").font(T.font(13, .semibold)) + Text("Scan to keep these steps on your phone, or open the guide.").font(T.font(13)))
+                    Link("gravitylinux.org/finish", destination: GuideLinks.recovery).font(T.mono(12))
+                }
+            }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(T.surface, in: RoundedRectangle(cornerRadius: 12))
+            Spacer(minLength: 0)
+        }
+    }
+    private func restartStep(_ number: Int, _ title: String, _ subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12).fill(number >= 3 ? T.ink : T.surface)
+                if number == 2 { Text("20s").font(T.mono(24, .medium)) }
+                else if number == 3 { HStack(spacing: 8) { Image(systemName: "power").font(.system(size: 22)); Text("10s").font(T.mono(20, .medium)) }.foregroundStyle(.white) }
+                else if number == 4 { HStack(spacing: 10) { RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.3)).frame(width: 20, height: 28); RoundedRectangle(cornerRadius: 4).fill(.white).frame(width: 20, height: 28); RoundedRectangle(cornerRadius: 4).fill(.white.opacity(0.3)).frame(width: 20, height: 28) } }
+                else { Image(systemName: "power").font(.system(size: 26)) }
+            }.frame(height: 72)
+            Text(String(number)).font(T.mono(12, .medium)).foregroundStyle(T.accent)
+            Text(title).font(T.font(14, .semibold)).fixedSize(horizontal: false, vertical: true)
+            Text(subtitle).font(T.font(12)).foregroundStyle(T.muted).lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+        }.frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+    private var finalize: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            Spacer(minLength: 0)
+            if let status = model.stage2, !status.in1TR || !status.paired {
+                heading("Your Mac started up in macOS", "Nothing went wrong, and your installation is saved. Startup options just didn’t open this time. Usually the power button was let go a little early.")
+                VStack(alignment: .leading, spacing: 18) {
+                    note("Wait the full 20 seconds", detail: "Your Mac has to be completely off before you press the button.", icon: "stopwatch")
+                    note("Keep holding past the logo", detail: "Let go only when you see “Loading startup options”.", icon: "power")
+                    note(status.in1TR ? "Choose the paired recovery" : "Use the button on your Mac", detail: status.in1TR ? "Choose the recovery environment paired with \(status.name)." : model.board?.powerButtonHelp ?? "A power key on an external keyboard won’t open startup options.", icon: "hand.point.up")
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("You’re in startup options", systemImage: "checkmark").font(T.font(13, .medium)).foregroundStyle(T.green)
+                    heading("Finish installing Gravity Linux", "One last step adds Gravity Linux to your Mac’s startup options.", size: 28)
+                }
+                note("You’ll need the username and password of a macOS administrator. Apple requires them to change startup options. macOS keeps its existing security setting.", icon: "lock")
+            }
+            Spacer(minLength: 0)
+        }
+    }
+    private var complete: some View {
+        VStack(spacing: 32) {
+            Spacer(minLength: 0)
+            VStack(spacing: 16) {
+                Image(systemName: "checkmark.circle").font(.system(size: 56, weight: .light)).foregroundStyle(T.green)
+                Text("Gravity Linux is installed").font(T.font(28, .semibold)).tracking(-0.42)
+                Text("Your Mac will restart into Gravity Linux.").font(T.font(14)).foregroundStyle(T.muted)
+            }.frame(maxWidth: .infinity)
+            VStack(alignment: .leading, spacing: 16) {
+                completionNote("Want to start up in macOS instead?", "Shut down, then press and hold the power button until startup options appear, and choose Macintosh HD.", icon: "power")
+                if let text = model.board?.postInstallNote { completionNote("Good to know in this alpha", text.replacingOccurrences(of: "Good to know in this alpha: ", with: ""), icon: "info.circle") }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+    private var existing: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            heading("Gravity Linux is already on this Mac", model.inspection?.existing.first(where: { $0.id == model.selectedExisting })?.name ?? "Choose an installation to repair, update, or remove.")
+            if (model.inspection?.existing.count ?? 0) > 1 { Picker("Installation", selection: $model.selectedExisting) { ForEach(model.inspection?.existing ?? []) { Text($0.name).tag($0.id) } } }
+            VStack(spacing: 0) {
+                T.hairline.frame(height: 1)
+                existingAction("Repair", "Fix startup problems. Your files and settings in Gravity Linux are kept.", icon: "wrench", operation: "repair")
+                existingAction("Upgrade firmware", "Update the Gravity Linux startup firmware to match your version of macOS.", icon: "cpu", operation: "upgrade")
+                existingAction("Uninstall", "Remove Gravity Linux and give its space back to macOS.", icon: "trash", operation: "uninstall").disabled(model.inspection?.existing.first(where: { $0.id == model.selectedExisting })?.canUninstall != true)
+            }
+            Spacer(minLength: 0)
+            Text("Want a fresh start? Uninstall first, then run the installer again.").font(T.font(13)).foregroundStyle(T.muted)
+        }
+    }
+    private func existingAction(_ title: String, _ subtitle: String, icon: String, operation: String) -> some View {
+        VStack(spacing: 0) {
+            Button { Task { await model.reviewMaintenance(operation) } } label: {
+                HStack(spacing: 16) {
+                    Image(systemName: icon).font(.system(size: 22)).frame(width: 24)
+                    VStack(alignment: .leading, spacing: 4) { Text(title).font(T.font(15, .medium)); Text(subtitle).font(T.font(13)).foregroundStyle(T.muted).fixedSize(horizontal: false, vertical: true) }
+                    Spacer(minLength: 0); Image(systemName: "chevron.right").font(.system(size: 14)).foregroundStyle(T.muted)
+                }.padding(.vertical, 20).padding(.horizontal, 8).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain)
+            T.hairline.frame(height: 1)
+        }
+    }
+    private func heading(_ title: String, _ subtitle: String, size: CGFloat = 24, subtitleWidth: CGFloat = 480) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(T.font(size, .semibold)).tracking(-size*0.01)
+            Text(subtitle).font(T.font(14)).foregroundStyle(T.muted).lineSpacing(4).padding(.vertical, 2).frame(maxWidth: subtitleWidth, alignment: .leading)
+        }.fixedSize(horizontal: false, vertical: true)
+    }
+    private func completionNote(_ title: String, _ detail: String, icon: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon).font(.system(size: 16)).frame(width: 18).foregroundStyle(icon == "info.circle" ? T.amber : T.ink)
+            VStack(alignment: .leading, spacing: 3) { Text(title).font(T.font(14, .semibold)); Text(detail).font(T.font(13)).foregroundStyle(T.muted).lineSpacing(3).fixedSize(horizontal: false, vertical: true) }
+        }.frame(maxWidth: 420, alignment: .leading)
+    }
+    private func instruction(_ text: String, icon: String) -> some View {
+        HStack(spacing: 12) { Image(systemName: icon).font(.system(size: 18)).foregroundStyle(T.muted).frame(width: 18); Text(text).font(T.font(14)) }
+    }
+    private func note(_ text: String, detail: String? = nil, icon: String, inline: Bool = false) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon).font(.system(size: 18)).frame(width: 18).padding(.top, 1)
+            if inline, let detail { (Text(text + " ").font(T.font(13, .semibold)) + Text(detail).font(T.font(13))).lineSpacing(3).fixedSize(horizontal: false, vertical: true) }
+            else { VStack(alignment: .leading, spacing: 3) {
+                Text(text).font(T.font(13, detail == nil ? .regular : .semibold))
+                if let detail { Text(detail).font(T.font(13)).lineSpacing(2) }
+            }.fixedSize(horizontal: false, vertical: true) }
+        }.padding(.vertical, 14).padding(.horizontal, 16).frame(maxWidth: .infinity, alignment: .leading).background(T.surface, in: RoundedRectangle(cornerRadius: 12))
+    }
+    private func radio(selected: Bool) -> some View {
+        ZStack { Circle().stroke(selected ? T.accent : T.border, lineWidth: 1).frame(width: 15, height: 15); if selected { Circle().fill(T.accent).frame(width: 7, height: 7) } }.frame(width: 15, height: 15)
+    }
     private func softwareCard(_ item: Software) -> some View {
         Button { model.softwareID = item.id; model.clampSize() } label: {
             VStack(alignment: .leading, spacing: 10) {
                 DesktopPreview(name: item.name).frame(height: 92).clipShape(RoundedRectangle(cornerRadius: 8)).accessibilityHidden(true)
-                HStack(spacing: 6) { radio(item.id); Text(shortName(item.name)).font(.system(size: 13, weight: .medium)).lineLimit(2) }
-                Text(desktopDescription(item.name)).font(.system(size: 11)).foregroundStyle(muted).frame(height: 34, alignment: .top)
-            }.padding(8).frame(maxWidth: .infinity, alignment: .leading).overlay(RoundedRectangle(cornerRadius: 12).stroke(model.softwareID == item.id ? accent : hairline, lineWidth: model.softwareID == item.id ? 2 : 1))
+                HStack(spacing: 8) { radio(selected: model.softwareID == item.id); Text(shortName(item.name)).font(T.font(14, .medium)) }.padding(.horizontal, 4)
+                (Text(desktopDescription(item.name)) + Text(shortName(item.name) == "KDE Plasma" ? " Recommended" : "").foregroundColor(T.accent))
+                    .font(T.font(12)).foregroundStyle(T.muted).lineSpacing(2).frame(maxWidth: .infinity, minHeight: 34, alignment: .topLeading).padding(.horizontal, 4)
+            }.padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 12).frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(model.softwareID == item.id ? T.accent : T.hairline, lineWidth: model.softwareID == item.id ? 2 : 1))
         }.buttonStyle(.plain).accessibilityLabel(item.name).accessibilityAddTraits(model.softwareID == item.id ? .isSelected : [])
     }
-    private func shortName(_ name: String) -> String { let n = name.lowercased(); return n.contains("kde") || n.contains("plasma") ? "KDE Plasma" : n.contains("gnome") ? "GNOME" : n.contains("sway") ? "Sway" : name }
-    private func desktopDescription(_ name: String) -> String { let n = name.lowercased(); return n.contains("kde") || n.contains("plasma") ? "Familiar and customizable. Recommended" : n.contains("gnome") ? "Elegant and easy to use." : "Tiling windows, driven by the keyboard." }
-    private func restartStep(_ icon: String, _ number: String, _ title: String, _ subtitle: String) -> some View { VStack(alignment: .leading, spacing: 10) { Image(systemName: icon).font(.system(size: 24)).frame(height: 36); Text(number).font(.system(size: 11, weight: .semibold)).foregroundStyle(muted); Text(title).font(.system(size: 12, weight: .semibold)); Text(subtitle).font(.system(size: 11)).foregroundStyle(muted) }.frame(maxWidth: .infinity, alignment: .topLeading) }
-    private func existingAction(_ title: String, _ subtitle: String, icon: String, operation: String) -> some View { Button { Task { await model.reviewMaintenance(operation) } } label: { HStack(spacing: 16) { Image(systemName: icon).font(.system(size: 22)).frame(width: 30); VStack(alignment: .leading, spacing: 5) { Text(title).fontWeight(.medium); Text(subtitle).font(.system(size: 12)).foregroundStyle(muted) }; Spacer(); Image(systemName: "chevron.right").foregroundStyle(muted) }.padding(18).background(surface, in: RoundedRectangle(cornerRadius: 12)) }.buttonStyle(.plain) }
+    private func shortName(_ name: String) -> String {
+        let n = name.lowercased(); return n.contains("kde") || n.contains("plasma") ? "KDE Plasma" : n.contains("gnome") ? "GNOME" : n.contains("sway") ? "Sway" : n.contains("minimal") ? "Minimal" : name
+    }
+    private func desktopDescription(_ name: String) -> String {
+        let n = name.lowercased(); return n.contains("kde") || n.contains("plasma") ? "Familiar and customizable." : n.contains("gnome") ? "Calm and focused, with fewer settings." : "Tiling windows, driven by the keyboard."
+    }
     private var footer: some View {
         HStack(spacing: 12) {
-            if model.busy && model.screen != .installing { ProgressView().controlSize(.small) }
             Spacer()
             switch model.screen {
-            case .welcome: pill("Quit") { NSApp.terminate(nil) }; pill("Continue", primary: true) { model.screen = .storage }
-            case .storage: pill("Go Back") { model.screen = .welcome }; pill("Continue", primary: true) { model.clampSize(); model.screen = .software }.disabled(model.target == nil || model.maximumGB < model.minimumGB)
-            case .software: pill("Go Back") { model.screen = .storage }; pill("Continue", primary: true) { Task { await model.review() } }.disabled(model.software == nil || model.busy)
-            case .review: pill("Go Back") { model.screen = model.maintenance == nil ? .software : .existing }; pill(model.maintenance?.operation == "uninstall" ? "Uninstall" : "Install", primary: true) { model.credentialsSheet = true }
-            case .restart: pill("Restart Later") { NSApp.terminate(nil) }; pill("Shut Down", primary: true) { Task { await model.power(restart: false) } }
+            case .welcome: PillButton(title: "Quit") { NSApp.terminate(nil) }; PillButton(title: "Continue", primary: true) { model.screen = .storage }
+            case .storage:
+                PillButton(title: "Go Back") { model.screen = .welcome }
+                PillButton(title: "Continue", primary: true) { model.clampSize(); Task { await model.chooseSoftware() } }.disabled(model.target == nil || model.maximumGB < model.minimumGB || model.target?.unavailableReason != nil)
+            case .software: PillButton(title: "Go Back") { model.screen = .storage }; PillButton(title: "Continue", primary: true) { Task { await model.review() } }.disabled(model.software == nil || model.busy)
+            case .review:
+                PillButton(title: "Go Back") { model.screen = model.maintenance == nil ? .software : .existing }
+                PillButton(title: model.maintenance?.operation == "uninstall" ? "Uninstall" : "Install", primary: true) { model.credentialsSheet = true }
+            case .restart: PillButton(title: "Restart Later") { NSApp.terminate(nil) }; PillButton(title: "Shut Down", primary: true) { Task { await model.power(restart: false) } }
             case .finalize:
-                if model.stage2?.in1TR != true || model.stage2?.paired != true { pill("Check Again") { Task { await model.load() } }; pill("Shut Down", primary: true) { Task { await model.power(restart: false) } } }
-                else { pill("Finalize Installation", primary: true) { model.credentialsSheet = true }.disabled(model.stage2?.ready != true) }
-            case .complete: pill("Restart", primary: true) { Task { await model.power(restart: true) } }
-            case .failure: pill("Quit") { NSApp.terminate(nil) }; pill("Check This Mac Again", primary: true) { model.error = nil; Task { await model.load() } }
+                if model.stage2?.in1TR != true || model.stage2?.paired != true {
+                    PillButton(title: "Show Steps Again") { model.screen = .restart }
+                    PillButton(title: "Shut Down", primary: true) { Task { await model.power(restart: false) } }
+                } else { PillButton(title: "Finalize Installation", primary: true) { model.credentialsSheet = true }.disabled(model.stage2?.ready != true) }
+            case .complete: PillButton(title: "Restart", primary: true) { Task { await model.power(restart: true) } }
+            case .failure: PillButton(title: "Quit") { NSApp.terminate(nil) }; PillButton(title: "Check This Mac Again", primary: true) { model.error = nil; Task { await model.load() } }
             case .unsupported:
-                pill("Quit") { NSApp.terminate(nil) }
-                if model.supportIssue?.reason == .developerRequired { pill("Developer Options…", primary: true) { model.developerSheet = true } }
-                else { pill("Check Again", primary: true) { Task { await model.load() } } }
-            case .existing, .removed: pill("Quit") { NSApp.terminate(nil) }
-            case .checking, .installing: EmptyView()
+                PillButton(title: "Quit") { NSApp.terminate(nil) }
+                if model.supportIssue?.reason == .developerRequired { PillButton(title: "Developer Options…", primary: true) { model.developerSheet = true } }
+                else { PillButton(title: "Check Again", primary: true) { Task { await model.load() } } }
+            case .existing, .removed: PillButton(title: "Quit") { NSApp.terminate(nil) }
+            case .checking, .installing: PillButton(title: "Continue", primary: true) {}.disabled(true)
             }
-        }.padding(.horizontal, 24).frame(height: 64).overlay(alignment: .top) { hairline.frame(height: 1) }
-    }
-    private func pill(_ text: String, primary: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Text(text).font(.system(size: 13, weight: .medium)).padding(.horizontal, 20).frame(height: 36).foregroundStyle(primary ? .white : ink).background(primary ? accent : .white, in: Capsule()).overlay(Capsule().stroke(primary ? .clear : Color.gray, lineWidth: 1)) }.buttonStyle(.plain)
+        }.padding(.horizontal, 24).frame(height: 64).overlay(alignment: .top) { T.hairline.frame(height: 1) }
     }
     private var safetySheet: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            Label("How we keep your Mac safe", systemImage: "checkmark.shield").font(.system(size: 22, weight: .semibold))
-            heading("macOS stays untouched", "We make its partition smaller using Apple’s APFS tool. Your files, apps, and settings are kept.")
-            heading("Nothing changes until you say so", "Partition changes start only after you review the plan and click Install.")
-            heading("Separate startup security", "Apple Silicon keeps a separate security policy for each installed operating system.")
-            HStack { Link("Read how it works", destination: GuideLinks.safety); Spacer(); pill("Done", primary: true) { model.safety = false } }
-        }.padding(32).frame(width: 500).preferredColorScheme(.light)
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 10) { Image(systemName: "checkmark.shield").font(.system(size: 32)).foregroundStyle(T.green); Text("How we keep your Mac safe").font(T.font(20, .semibold)) }
+            VStack(alignment: .leading, spacing: 12) {
+                safetyItem("macOS stays untouched", "We only make its partition smaller, using Apple’s own resize tool. Your files, apps and settings aren’t touched.")
+                safetyItem("Nothing changes until you say so", "Your disk isn’t modified until you click Install on the Review screen.")
+                safetyItem("Your warranty isn’t affected", "Installing another operating system doesn’t void your Mac’s warranty.")
+            }
+            HStack { Link("Read how it works", destination: GuideLinks.safety).font(T.font(13)).foregroundStyle(T.accent); Spacer(); PillButton(title: "Done", primary: true) { model.safety = false } }
+        }.padding(.horizontal, 40).padding(.top, 28).padding(.bottom, 22).frame(width: 560).background(.white, in: AttachedSheet()).shadow(color: .black.opacity(0.1), radius: 12, y: 4).accessibilityAddTraits(.isModal)
+    }
+    private func safetyItem(_ title: String, _ detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) { Text(title).font(T.font(13, .semibold)); Text(detail).font(T.font(13)).foregroundStyle(T.muted).lineSpacing(3) }
     }
     private var authenticationSheet: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Label("Enter your macOS administrator login", systemImage: "lock.shield").font(.system(size: 18, weight: .semibold))
-            Text(model.stage2 == nil ? "This authorizes the changes you reviewed." : "This allows Gravity Linux to be added to your startup options.").foregroundStyle(muted)
-            TextField("Username", text: $model.username).textFieldStyle(.roundedBorder).disabled(geteuid() != 0 && !model.launch.configuration.demo)
-            SecureField("Password", text: $model.password).textFieldStyle(.roundedBorder).onSubmit { if !model.password.isEmpty && !model.username.isEmpty { Task { await model.install() } } }
-            HStack { Spacer(); pill("Cancel") { model.credentialsSheet = false; model.password = "" }; pill(model.stage2 == nil ? "Continue" : "Finalize", primary: true) { Task { await model.install() } }.disabled(model.username.isEmpty || model.password.isEmpty) }
-        }.padding(32).frame(width: 430).preferredColorScheme(.light)
-    }
-    private var developerSheet: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            Toggle("Enable developer options", isOn: $model.developer)
-            Text("Enable experimental board profiles and software for testing Gravity Linux.").foregroundStyle(muted)
-            if model.developer {
-                Text("Experimental images are listed when available from the CDN. Hardware checks and recovery verification always apply.").font(.caption).foregroundStyle(muted)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "lock").font(.system(size: 28)).frame(width: 28)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Enter your macOS administrator login").font(T.font(16, .semibold))
+                    Text(model.stage2 == nil ? "This authorizes the changes you reviewed." : "This allows Gravity Linux to be added to your startup options.").font(T.font(13)).foregroundStyle(T.muted).lineSpacing(2)
+                }
             }
-            HStack { Spacer(); pill("Done", primary: true) { Task { await model.applyDeveloperOptions() } } }
-        }.padding(28).frame(width: 470).preferredColorScheme(.light)
+            VStack(spacing: 12) {
+                HStack(spacing: 12) { Text("Username").frame(width: 84, alignment: .trailing); TextField("", text: $model.username).textFieldStyle(.plain).font(T.font(14)).padding(.horizontal, 10).frame(height: 32).overlay(RoundedRectangle(cornerRadius: 6).stroke(T.border, lineWidth: 1)).disabled(geteuid() != 0 && !model.launch.configuration.demo).accessibilityLabel("Username") }
+                HStack(spacing: 12) { Text("Password").frame(width: 84, alignment: .trailing); SecureField("", text: $model.password).textFieldStyle(.plain).font(T.font(14)).padding(.horizontal, 10).frame(height: 32).overlay(RoundedRectangle(cornerRadius: 6).stroke(T.border, lineWidth: 1)).accessibilityLabel("Password").onSubmit { if !model.password.isEmpty && !model.username.isEmpty { Task { await model.install() } } } }
+            }.font(T.font(13))
+            HStack { Spacer(); PillButton(title: "Cancel") { model.credentialsSheet = false; model.password = "" }; PillButton(title: model.stage2 == nil ? "Install" : "Finalize", primary: true) { Task { await model.install() } }.disabled(model.username.isEmpty || model.password.isEmpty) }
+        }.padding(.horizontal, 32).padding(.top, 28).padding(.bottom, 22).frame(width: 440).background(.white, in: AttachedSheet()).shadow(color: .black.opacity(0.1), radius: 10, y: 4).accessibilityAddTraits(.isModal)
     }
 }
 struct DesktopPreview: View {
@@ -279,12 +517,15 @@ struct DesktopPreview: View {
     var body: some View {
         GeometryReader { g in
             ZStack(alignment: .bottom) {
-                surface.brightness(-0.04)
+                Color(red: 232/255, green: 232/255, blue: 237/255)
                 if name.lowercased().contains("sway") {
-                    HStack(spacing: 4) { Color.white.overlay(Rectangle().stroke(accent, lineWidth: 1.5)); VStack(spacing: 4) { Color.gray; Color.gray } }.padding(8).background(ink)
+                    HStack(spacing: 4) { Color.white.overlay(Rectangle().stroke(T.accent, lineWidth: 1.5)); VStack(spacing: 4) { T.muted; T.muted } }.padding(.top, 12).padding(.horizontal, 6).padding(.bottom, 6).background(T.ink)
+                } else if name.lowercased().contains("gnome") {
+                    T.ink.frame(height: 9).frame(maxHeight: .infinity, alignment: .top)
+                    RoundedRectangle(cornerRadius: 6).fill(.white).frame(width: 90, height: 52).position(x: g.size.width/2, y: 48)
                 } else {
-                    RoundedRectangle(cornerRadius: 5).fill(.white).frame(width: g.size.width * 0.6, height: 50).position(x: g.size.width / 2, y: 40)
-                    HStack(spacing: 4) { ForEach(0..<4) { i in RoundedRectangle(cornerRadius: 1).fill(i == 0 ? accent : .gray).frame(width: 6, height: 6) }; Spacer() }.padding(.horizontal, 6).frame(height: name.lowercased().contains("gnome") ? 9 : 14).background(ink).frame(maxHeight: .infinity, alignment: name.lowercased().contains("gnome") ? .top : .bottom)
+                    RoundedRectangle(cornerRadius: 4).fill(.white).frame(width: 84, height: 50).position(x: 60, y: 39)
+                    HStack(spacing: 4) { ForEach(0..<3) { i in RoundedRectangle(cornerRadius: 1).fill(i == 0 ? T.accent : T.border).frame(width: 6, height: 6) }; Spacer() }.padding(.horizontal, 6).frame(height: 14).background(T.ink)
                 }
             }
         }

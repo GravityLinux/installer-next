@@ -60,6 +60,9 @@ private struct HardwareProbe: CommandRunning {
     do { _ = try await gated.checkBoardSupport(); Issue.record("Gated board passed preflight") }
     catch let error as BoardSupportError { #expect(error.reason == .developerRequired) }
     var developerConfig = config; developerConfig.developer = true
+    let unchecked = InstallerEngine(configuration: developerConfig, commands: HardwareProbe(hardware: j700Hardware))
+    await #expect(throws: BoardSupportError.self) { try await unchecked.checkBoardSupport() }
+    developerConfig.developerOptions.allowUnsupportedMacs = true
     let developer = InstallerEngine(configuration: developerConfig, commands: HardwareProbe(hardware: j700Hardware))
     #expect(try await developer.checkBoardSupport().productNumber == "j700")
 }

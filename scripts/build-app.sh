@@ -18,6 +18,7 @@ cp "$root/Resources/Info.plist" "$output/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :GravityRevision string $installer_revision" "$output/Contents/Info.plist"
 cp "$root/install.sh" "$output/Contents/Resources/launch.sh"
 cp "$root/LICENSE" "$output/Contents/Resources/"
+cp -R "$root/Resources/fonts" "$output/Contents/Resources/"
 # Clean obsolete resources when rebuilding an existing output bundle.
 rm -f "$output/Contents/Resources/NOTICE"
 rm -rf "$output/Contents/Resources/licenses/asahi-installer"

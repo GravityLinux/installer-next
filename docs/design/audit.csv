@@ -1,0 +1,18 @@
+reference,view,correction,verification,content_variations
+1,Gathering Info,Centered spinner and heading; disabled Continue; matching window and sidebar,Native render,No credentials or CDN query during inspection
+1b,Existing installation,Divider-separated repair/upgrade/uninstall rows and bottom note,Native render,Actual installation identity and supported maintenance actions
+2,Welcome,Geist fonts; exact colors; 216-point sidebar; device card and instruction spacing,Native render,Product number and board-specific status; no invented download size or duration
+Sheet,Safety,560-point top-attached panel; shield; three compact explanations; footer,Native render,Guide link uses the configured documentation placeholder
+3,Partition,72-point labeled partition diagram; used-space shading; inline slider and value; bottom notice,Native render and core resize-plan checks,Live APFS limits; disabled shrink explanation and free-space selection
+4,Desktop,Equal desktop cards; matching thumbnails; radio rows and blue recommendation,Native render and live candidate tests,Only compatible published images; release labels use actual metadata
+5,Review,10-point allocation bar and three-row detail table; bottom credential explanation,Native render and plan-identity tests,Free-space and bootloader-only plans describe their actual changes
+6,Installing,Centered heading; thin progress bar; step caption; help and details link; disabled footer,Native render,Actual step-specific help and progress; no fabricated ETA
+7,Restart,Four illustrated tiles; numbered steps; board-specific button guidance and QR panel,Native render,Working QR; content fits the 600-point window instead of clipping the prototype footer
+7b,Started in macOS,Recovery tips and Show Steps Again; Restart sidebar indicator,Native render,Wrong pairing is described separately from a normal macOS boot
+8,Finalize,Centered startup-options status; 28-point heading; authorization note,Native render and stage2 tests,Describes preservation of the existing macOS security setting
+8b,Administrator login,440-point attached panel; 32-point inputs; labeled username/password grid,Native render and privileged-session integration,Current administrator fixed in normal macOS; editable in recovery
+10,Complete,Centered success state and unboxed startup/alpha notes; neutral sidebar,Native render,Actual board-specific limitations
+Dev menu,App menu,Native Developer Options menu item and Option-Command-D shortcut,Native app menu,Native macOS application menu
+Dev off,Developer Options disabled,Separate 520x220 window; unchecked opt-in; Done footer,Native render and default-policy tests,Release channel does not automatically enable developer mode
+Dev on,Developer Options enabled,520x640 expanded window with all reference controls,Native render and developer-option tests,Checksum bypass affects Linux images; Apple verification stays enabled
+Dev software,Desktop in developer mode,Top-right title-bar badge and extra tethered-boot row,Native render,Experimental hardware still requires explicit opt-in and a compiled profile

@@ -19,6 +19,7 @@ actor InstallerSession {
     }
     func checkBoardSupport() async throws -> BoardPresentation { try await engine.checkBoardSupport() }
     func inspect() async throws -> Inspection { try await engine.inspect() }
+    func availableSoftware() async throws -> [Software] { try await engine.availableSoftware() }
     func stage2Status() async throws -> Stage2Status { try await engine.stage2Status() }
     func plan(_ selection: InstallSelection) async throws -> InstallPlan {
         let plan = try await engine.plan(selection); plans = [plan.id: plan]; return plan
@@ -82,6 +83,10 @@ private final class PrivilegedProcess {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
         var arguments = ["-S", "-k", "-p", "", "--", CommandLine.arguments[0], "--api", "--resources", configuration.resourceDirectory.path]
         arguments.append(configuration.developer ? "--developer" : "--no-developer")
+        arguments += [configuration.developerOptions.allowUnsupportedMacs ? "--allow-experimental-boards" : "--no-experimental-boards",
+            configuration.bypassImageChecks ? "--bypass-image-checks" : "--verify-image-checks",
+            configuration.developerOptions.keepDownloads ? "--keep-downloads" : "--discard-downloads",
+            configuration.developerOptions.verboseLogging ? "--verbose-logging" : "--quiet-logging"]
         arguments += ["--catalog", configuration.catalogURL.absoluteString, "--repository", configuration.repositoryURL.absoluteString]
         if let stage2 = configuration.stage2URL { arguments += ["--stage2", stage2.path] }
         process.arguments = arguments; process.standardInput = input; process.standardOutput = output; process.standardError = errors

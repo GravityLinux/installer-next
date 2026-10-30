@@ -32,6 +32,7 @@ final class HTTPRangeSource: RandomAccessSource {
     private var cache: [Int64: Data] = [:]
     private var order: [Int64] = []
     private let blockSize: Int64 = 1_048_576
+    private var diskCache: URL?
     static func request(_ request: URLRequest, session: URLSession) throws -> (Data, HTTPURLResponse) {
         let result = HTTPResult(); let semaphore = DispatchSemaphore(value: 0)
         session.dataTask(with: request) { data, response, error in
@@ -42,17 +43,21 @@ final class HTTPRangeSource: RandomAccessSource {
         guard let response = result.response as? HTTPURLResponse else { throw InstallerError("Invalid HTTP response") }
         return (result.data ?? Data(), response)
     }
-    init(_ url: URL) throws {
+    init(_ url: URL, cacheDirectory: URL? = nil, session: URLSession? = nil) throws {
         try require(url.scheme == "https" || (url.scheme == "http" && ["localhost", "127.0.0.1", "::1"].contains(url.host ?? "")), "Downloads require HTTPS")
         self.url = url
         let config = URLSessionConfiguration.ephemeral; config.timeoutIntervalForRequest = 30; config.timeoutIntervalForResource = 120
-        session = URLSession(configuration: config)
+        self.session = session ?? URLSession(configuration: config)
         var request = URLRequest(url: url); request.httpMethod = "HEAD"; request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
-        let (_, response) = try Self.request(request, session: session)
+        let (_, response) = try Self.request(request, session: self.session)
         guard response.statusCode == 200, let value = response.value(forHTTPHeaderField: "Content-Length"), let size = Int64(value), size > 0 else {
             throw InstallerError("Server must provide archive Content-Length")
         }
         self.size = size; validator = response.value(forHTTPHeaderField: "ETag") ?? response.value(forHTTPHeaderField: "Last-Modified")
+        if let cacheDirectory, let validator {
+            let directory = cacheDirectory.appendingPathComponent(Data((url.absoluteString + "\n" + validator + "\n" + String(size)).utf8).sha256, isDirectory: true)
+            if (try? fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])) != nil { diskCache = directory }
+        }
     }
     func read(offset: Int64, count: Int) throws -> Data {
         try require(offset >= 0 && count >= 0 && offset <= size - Int64(count), "Read outside HTTP archive")
@@ -67,13 +72,17 @@ final class HTTPRangeSource: RandomAccessSource {
                 request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
                 if let validator { request.setValue(validator, forHTTPHeaderField: "If-Range") }
                 var fetched: Data?
-                for attempt in 0..<5 {
+                let cached = diskCache?.appendingPathComponent("\(start)-\(length).range")
+                if let cached, let bytes = try? Data(contentsOf: cached), bytes.count == Int(length) { fetched = bytes }
+                for attempt in 0..<5 where fetched == nil {
                     do {
                         let (data, response) = try Self.request(request, session: session)
                         try require(response.statusCode == 206, "Archive server does not support byte ranges, or the archive changed")
                         try require(response.value(forHTTPHeaderField: "Content-Range") == "bytes \(start)-\(start + length - 1)/\(size)", "Invalid HTTP Content-Range")
                         try require(data.count == Int(length), "Truncated HTTP range")
-                        fetched = data; break
+                        fetched = data
+                        if let cached { try? data.write(to: cached, options: .atomic); try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: cached.path) }
+                        break
                     } catch {
                         if attempt == 4 { throw error }
                         Thread.sleep(forTimeInterval: Double(attempt + 1))
@@ -108,13 +117,15 @@ struct ZIPEntry: Sendable {
 }
 final class ZIPArchive {
     let source: RandomAccessSource
+    private let verifyCRC: Bool
     private(set) var entries: [ZIPEntry] = []
     private var byName: [String: ZIPEntry] = [:]
-    init(_ url: URL) throws {
-        source = try url.isFileURL ? LocalSource(url) : HTTPRangeSource(url)
+    init(_ url: URL, verifyCRC: Bool = true, cacheDirectory: URL? = nil) throws {
+        self.verifyCRC = verifyCRC
+        source = try url.isFileURL ? LocalSource(url) : HTTPRangeSource(url, cacheDirectory: cacheDirectory)
         try readDirectory()
     }
-    init(source: RandomAccessSource) throws { self.source = source; try readDirectory() }
+    init(source: RandomAccessSource) throws { self.source = source; verifyCRC = true; try readDirectory() }
     private func readDirectory() throws {
         try require(source.size >= 22, "Invalid ZIP archive")
         let tailSize = Int(min(source.size, 65_557)); let tailOffset = source.size - Int64(tailSize)
@@ -205,7 +216,7 @@ final class ZIPArchive {
             } while true
             if ended { try require(read == entry.compressedSize && pos == chunk.count, "Trailing ZIP deflate data"); break }
         }
-        try require(ended && written == entry.size && crc == entry.crc, "ZIP member size or CRC mismatch: \(entry.name)")
+        try require(ended && written == entry.size && (!verifyCRC || crc == entry.crc), "ZIP member size or CRC mismatch: \(entry.name)")
     }
     func extract(_ name: String, to destination: URL, progress: ((Double) -> Void)? = nil) throws {
         let entry = try entry(name); try mkdir(destination.deletingLastPathComponent())

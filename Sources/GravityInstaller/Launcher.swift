@@ -25,7 +25,6 @@ struct LaunchOptions {
         configuration = EngineConfiguration(resourceDirectory: resources, appBundle: bundle, stage2URL: FileManager.default.fileExists(atPath: stage2.path) ? stage2 : nil)
         configuration.demo = Bundle.main.object(forInfoDictionaryKey: "GravityDemo") as? Bool == true
         if let bundle, let distribution = try InstallerDistribution.read(from: bundle) {
-            configuration.developer = distribution.channel != "stable"
             if let url = distribution.catalogURL { configuration.catalogURL = url }
             if let url = distribution.repositoryURL { configuration.repositoryURL = url }
         }
@@ -40,8 +39,16 @@ struct LaunchOptions {
             case "--inspect": inspect = true
             case "--gui": break
             case "--demo": configuration.demo = true
-            case "--developer": configuration.developer = true
+            case "--developer": configuration.developer = true; configuration.developerOptions.allowUnsupportedMacs = true
             case "--no-developer": configuration.developer = false
+            case "--allow-experimental-boards": configuration.developerOptions.allowUnsupportedMacs = true
+            case "--no-experimental-boards": configuration.developerOptions.allowUnsupportedMacs = false
+            case "--bypass-image-checks": configuration.developerOptions.bypassImageChecks = true
+            case "--verify-image-checks": configuration.developerOptions.bypassImageChecks = false
+            case "--keep-downloads": configuration.developerOptions.keepDownloads = true
+            case "--discard-downloads": configuration.developerOptions.keepDownloads = false
+            case "--verbose-logging": configuration.developerOptions.verboseLogging = true
+            case "--quiet-logging": configuration.developerOptions.verboseLogging = false
             case "--resources": configuration.resourceDirectory = URL(fileURLWithPath: try value()).standardizedFileURL
             case "--catalog", "--repository":
                 let option = arguments[i], path = try value()
@@ -105,7 +112,7 @@ struct LaunchOptions {
                     catch { FileHandle.standardError.write(Data(("Error: \(error.localizedDescription)\n").utf8)); exit(1) }
                 }
                 dispatchMain()
-            } else { GravityApp.main() }
+            } else { InstallerTheme.registerFonts(resources: options.configuration.resourceDirectory); GravityApp.main() }
         } catch { FileHandle.standardError.write(Data(("\(error.localizedDescription)\n\n\(TerminalClient.usage)\n").utf8)); exit(2) }
     }
 }

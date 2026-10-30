@@ -130,6 +130,7 @@ public struct StorageTarget: Codable, Identifiable, Equatable, Sendable {
     public let totalBytes: Int64
     public let freeBytes: Int64
     public let maximumBytes: Int64
+    public var unavailableReason: String? = nil
 }
 public struct ExistingInstallation: Codable, Identifiable, Sendable {
     public let id: String
@@ -143,7 +144,7 @@ public struct Inspection: Codable, Sendable {
     public let administrator: String
     public let administrators: [String]
     public let targets: [StorageTarget]
-    public let software: [Software]
+    public var software: [Software]
     public let existing: [ExistingInstallation]
     public var board: BoardPresentation? = nil
     public var boardProfileID: String? = nil
@@ -166,11 +167,12 @@ public struct InstallPlan: Codable, Identifiable, Sendable {
     public let macOSAfterBytes: Int64?
     public let changes: [String]
     public var fingerprint: String? = nil
+    public var policyFingerprint: String? = nil
 
     public func hasSameReview(as other: InstallPlan) -> Bool {
         selection == other.selection && target.id == other.target.id && target.kind == other.target.kind
             && target.name == other.target.name && target.totalBytes == other.target.totalBytes && software == other.software
-            && macOSAfterBytes == other.macOSAfterBytes && changes == other.changes && fingerprint == other.fingerprint
+            && macOSAfterBytes == other.macOSAfterBytes && changes == other.changes && fingerprint == other.fingerprint && policyFingerprint == other.policyFingerprint
     }
 }
 public struct Credentials: Sendable {
@@ -185,11 +187,35 @@ public struct EngineConfiguration: Sendable {
     public var appBundle: URL?
     public var stage2URL: URL?
     public var developer = false
+    public var developerOptions = DeveloperOptions()
+    public var boardDeveloper: Bool { developer && developerOptions.allowUnsupportedMacs }
+    public var bypassImageChecks: Bool { developer && developerOptions.bypassImageChecks }
+    public var downloadCache: URL? {
+        guard developer && developerOptions.keepDownloads else { return nil }
+        return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?.appendingPathComponent("org.gravitylinux.installer/downloads", isDirectory: true)
+    }
+    var policyFingerprint: String { Data("\(boardDeveloper):\(bypassImageChecks)".utf8).sha256 }
     public var demo = false
     public init(resourceDirectory: URL, appBundle: URL? = nil, stage2URL: URL? = nil, demo: Bool = false,
                 catalogURL: URL = ReleaseCatalog.productionURL, repositoryURL: URL = ReleaseCatalog.productionRepository) {
         self.resourceDirectory = resourceDirectory; self.appBundle = appBundle; self.stage2URL = stage2URL; self.demo = demo
         self.catalogURL = catalogURL; self.repositoryURL = repositoryURL
+    }
+}
+public struct DeveloperOptions: Equatable, Sendable {
+    public var customCDN = ""
+    public var releaseChannel = "stable"
+    public var bypassImageChecks = false
+    public var allowUnsupportedMacs = false
+    public var verboseLogging = true
+    public var keepDownloads = false
+    public init() {}
+    public func sources(defaultCatalog: URL, defaultRepository: URL) throws -> (catalog: URL, repository: URL) {
+        let text = customCDN.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty || releaseChannel != "stable" else { return (defaultCatalog, defaultRepository) }
+        guard let base = text.isEmpty ? defaultRepository : URL(string: text), ["stable", "nightly"].contains(releaseChannel) else { throw InstallerError("Enter a valid CDN URL and release channel.") }
+        try ReleaseCatalog.validateSource(base)
+        return (base.appendingPathComponent(releaseChannel == "nightly" ? "installer-dev/installer_data.json" : "installer/installer_data.json"), base)
     }
 }
 public enum GuideLinks {
@@ -252,7 +278,7 @@ public struct SoftwareTemplate: Codable, Sendable {
         if let versions = supported_fw, !versions.contains(board.restore.version) { return false }
         return board.installationModes.contains(mode)
     }
-    public static let bootloaderOnly = SoftwareTemplate(name: "Bootloader only", mode: .bootloader)
+    public static let bootloaderOnly = SoftwareTemplate(name: "Bootloader only", mode: .bootloader, developer: true)
     var layout: [PartitionTemplate] {
         switch mode {
         case .linux: return partitions

@@ -27,6 +27,8 @@ enum Screen: Int { case checking = -1, welcome, storage, software, review, insta
     @Published var username = ""
     @Published var password = ""
     @Published var developer = false
+    @Published var developerOptions = DeveloperOptions()
+    var renderingPreview = false
     @Published var stage2: Stage2Status?
     @Published var selectedExisting = ""
     let launch: LaunchOptions
@@ -34,15 +36,26 @@ enum Screen: Int { case checking = -1, welcome, storage, software, review, insta
     var lastStep: InstallStep?
     var lastOperationTitle: String?
     init() {
-        launch = try! LaunchOptions(); developer = launch.configuration.developer
+        launch = try! LaunchOptions(); developer = launch.configuration.developer; developerOptions = launch.configuration.developerOptions
         createEngine()
     }
     func createEngine() {
         var configuration = launch.configuration; configuration.developer = developer
+        configuration.developerOptions = developerOptions
+        if developer, let sources = try? developerOptions.sources(defaultCatalog: configuration.catalogURL, defaultRepository: configuration.repositoryURL) {
+            configuration.catalogURL = sources.catalog; configuration.repositoryURL = sources.repository
+        }
         engine = InstallerSession(configuration: configuration) { [weak self] event in Task { @MainActor in self?.receive(event) } }
     }
-    func applyDeveloperOptions() async {
-        developerSheet = false; createEngine(); await load()
+    func applyDeveloperOptions(enabled: Bool, options: DeveloperOptions) async {
+        let previous = screen, oldTarget = targetID, oldSoftware = softwareID
+        developer = enabled; developerOptions = options; developerSheet = false; createEngine(); await load()
+        if inspection != nil && [.welcome, .storage, .software].contains(previous) {
+            if inspection?.targets.contains(where: { $0.id == oldTarget && $0.unavailableReason == nil }) == true { targetID = oldTarget }
+            if inspection?.software.contains(where: { $0.id == oldSoftware }) == true { softwareID = oldSoftware }
+            clampSize(); screen = previous
+            if previous == .software { await chooseSoftware() }
+        }
     }
     func receive(_ event: InstallEvent) {
         if [InstallStep.resize, .createStub, .volumes, .partition, .securityPolicy, .reducedSecurity, .uninstall, .repair].contains(event.step) { changesMayHaveStarted = true }
@@ -55,8 +68,8 @@ enum Screen: Int { case checking = -1, welcome, storage, software, review, insta
     var target: StorageTarget? { inspection?.targets.first { $0.id == targetID } }
     var software: Software? { inspection?.software.first { $0.id == softwareID } }
     var board: BoardPresentation? { inspection?.board ?? stage2?.board }
-    var minimumGB: Double { Double(software?.minimumBytes ?? 30_000_000_000) / 1e9 }
-    var maximumGB: Double { Double(target?.maximumBytes ?? 30_000_000_000) / 1e9 }
+    var minimumGB: Double { ceil(Double(software?.minimumBytes ?? 30_000_000_000) / 1e9) }
+    var maximumGB: Double { floor(Double(target?.maximumBytes ?? 0) / 1e9) }
     var active: Int {
         switch screen {
         case .storage: return 1
@@ -64,7 +77,8 @@ enum Screen: Int { case checking = -1, welcome, storage, software, review, insta
         case .review: return 3
         case .installing: return stage2 == nil ? 4 : 6
         case .restart: return 5
-        case .finalize, .complete: return 6
+        case .finalize: return stage2?.in1TR == true && stage2?.paired == true ? 6 : 5
+        case .complete: return -1
         default: return 0
         }
     }
@@ -77,10 +91,12 @@ enum Screen: Int { case checking = -1, welcome, storage, software, review, insta
             _ = try await engine.checkBoardSupport()
             if launch.configuration.stage2URL != nil {
                 let status = try await engine.stage2Status(); stage2 = status; volumeName = status.name
+                if status.developerMode { developer = true; developerOptions.allowUnsupportedMacs = true }
                 screen = status.complete ? .complete : .finalize
             } else {
                 let info = try await engine.inspect(); inspection = info
-                targetID = info.targets.first?.id ?? ""; softwareID = info.software.first?.id ?? ""
+                softwareID = info.software.first?.id ?? ""
+                targetID = info.targets.first(where: { $0.unavailableReason == nil && $0.maximumBytes >= (software?.minimumBytes ?? 30_000_000_000) })?.id ?? info.targets.first?.id ?? ""
                 username = info.administrator; selectedExisting = info.existing.first?.id ?? ""
                 clampSize(); screen = info.existing.isEmpty ? .welcome : .existing
             }
@@ -88,6 +104,17 @@ enum Screen: Int { case checking = -1, welcome, storage, software, review, insta
           catch { self.error = error.localizedDescription; screen = .failure }
     }
     func clampSize() { sizeGB = min(max(sizeGB, minimumGB), max(minimumGB, maximumGB)) }
+    func chooseSoftware() async {
+        guard !busy else { return }
+        screen = .software; busy = true; error = nil
+        defer { busy = false }
+        do {
+            let choices = try await engine.availableSoftware()
+            inspection?.software = choices
+            if !choices.contains(where: { $0.id == softwareID }) { softwareID = choices.first?.id ?? "" }
+            clampSize()
+        } catch { self.error = error.localizedDescription }
+    }
     func review() async {
         busy = true; defer { busy = false }
         do {

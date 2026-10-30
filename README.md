@@ -62,8 +62,9 @@ curl -fsSL http://127.0.0.1:5050/bootstrap.sh | \
 For the TUI, replace the final `sh` with `sh -s -- --tui`. `--demo` previews the
 interface, `--update` updates without launching, and `--version` prints the
 installed version. The bootstrap saves its download configuration in the app;
-later launches do not need the server's temporary files. The development channel
-enables developer-only boards such as j700.
+later launches do not need the server's temporary files. Developer Options starts
+disabled on ordinary launches, including development channel builds. Enable it
+explicitly to test experimental features.
 
 `INSTALLER_BASE` selects the app-update artifacts. Available OS images and their
 layouts are fetched from `https://cdn.gravitylinux.org/installer/installer_data.json`;
@@ -72,6 +73,11 @@ relative package filenames resolve under `https://cdn.gravitylinux.org/os/`.
 and the app saves the values for subsequent launches. Direct app launches accept
 `--catalog URL_OR_PATH --repository URL_OR_PATH` for local image testing. Local
 HTTP is allowed on loopback; use an SSH tunnel or HTTPS for another computer.
+
+The CDN is first queried when the user opens Choose your desktop, after local
+inspection and partition selection. A custom CDN entered in Developer Options
+therefore applies before the first image request. Publishing metadata alone
+does not enable hardware absent from the compiled registry.
 
 Hardware detection, developer gates, firmware loaders, restore qualification and
 storage constraints are compiled into the installer. Adding board support needs
@@ -85,6 +91,11 @@ collected on the target Mac, and the generated firmware bundle stays local.
 The only GitHub automation is a macOS test and preview-packaging check.
 
 ## Credentials and design inventory
+
+The original HTML design is preserved at `docs/design/reference.html`. The
+screen-by-screen review is `docs/design/audit.csv`. Generate the native views
+with `swift run gravity-installer --render-preview dist/design-review/current`.
+The UI uses the design's Geist fonts, shipped under the bundled font license.
 
 Startup inspection and review use read-only queries and never mount volumes or
 read privileged boot policy. Ask for credentials after Review. The GUI/TUI starts
@@ -102,12 +113,27 @@ possible actions and design notes. Some rows identify states that still need a
 dedicated presentation; the list is a design specification, not an assertion that
 all variants already have finished UI. There is no separate Authorize screen.
 
+In the JSON Lines API, `inspect` returns local hardware/storage information
+without fetching image metadata; call `listSoftware` on entering software
+selection, then `plan` and `install`. The privileged process checks the selected
+CDN entry again before changing the disk. The TUI follows the same sequence.
+
+Developer Options offers a custom CDN, Stable/Nightly image channels, explicit
+experimental-board access, Linux-image CRC bypass, detailed logging and local
+download retention. Apple recovery hashes, firmware validation, archive bounds
+and board identity checks always apply. Retained archive ranges are private to
+this Mac and reused only when the server validator and length still match.
+Shrinking is shown with an explanation when APFS limits or the macOS free-space
+reserve make it unavailable; existing unallocated space remains selectable.
+
 ## Board support and firmware qualification
 
 Boards use their product numbers throughout the app, API and source files:
 `j773g` is enabled normally; `j700` is experimental and requires developer mode.
 Its exact hardware match is `j700ap`, chip `0x8140`, board `0x64`.
-Enable Developer Options in the GUI or pass `--developer` in the TUI/CLI.
+Enable Developer Options and select Allow unsupported Macs in the GUI, or pass
+`--developer` in the TUI/CLI. This enables only compiled experimental profiles;
+an unknown board still needs its own profile and firmware qualification.
 `--no-developer` explicitly disables it, including on a development channel.
 
 Unknown boards show a dedicated unsupported-board screen before authorization or

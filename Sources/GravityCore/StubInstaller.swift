@@ -10,10 +10,10 @@ final class StubInstaller {
     var manifest: [String: Any], installed: InstalledOS?
     var installerData: [(URL, String)] = [], stubInfo: [String: Any] = [:]
     let restorePath: String
-    init(system: MacSystem, disk: DiskManager, board: BoardProfile, resources: URL, app: URL, events: @escaping EventSink) throws {
+    init(system: MacSystem, disk: DiskManager, board: BoardProfile, resources: URL, app: URL, events: @escaping EventSink, downloadCache: URL? = nil) throws {
         self.board = board; self.system = system; self.disk = disk; self.resources = resources; self.app = app; self.events = events
         temporary = try TemporaryDirectory(prefix: "gravity-install")
-        events(InstallEvent(.ipsw)); archive = try ZIPArchive(board.restore.url)
+        events(InstallEvent(.ipsw)); archive = try ZIPArchive(board.restore.url, cacheDirectory: downloadCache)
         manifest = try plist(archive.data("BuildManifest.plist")); bootcaches = try plist(archive.data("usr/standalone/bootcaches.plist"))
         let identity = try board.restore.selectIdentity(in: manifest, hardware: system.hardware)
         restorePath = try board.restore.restoreBundlePath(bootcaches: bootcaches)

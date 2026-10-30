@@ -46,6 +46,8 @@ enum TerminalClient {
       gravity-installer --fwextract SOURCE DEST  Rebuild saved firmware (optional: --board PROFILE_ID)
     Options: --resources PATH --developer|--no-developer
       --catalog URL_OR_PATH --repository URL_OR_PATH  Override CDN image sources
+    Developer flags: --allow-experimental-boards --bypass-image-checks
+      --keep-downloads --verbose-logging|--quiet-logging
     Stage2 is automatic when launched from the installed recovery app.
     """
     static func prompt(_ text: String, default fallback: String? = nil) throws -> String {
@@ -104,8 +106,9 @@ enum TerminalClient {
             print(restartGuide(os.name))
         } else {
             print("Gravity Linux runs alongside macOS. Keep your Mac connected to power and the internet.")
-            let target = try choose(info.targets, name: { "\($0.name) · up to \(sizeText($0.maximumBytes))" })
-            let software = try choose(info.software, name: { "\($0.name) · requires \(sizeText($0.minimumBytes))" })
+            for target in info.targets where target.unavailableReason != nil { print("\(target.name): \(target.unavailableReason!)") }
+            let target = try choose(info.targets.filter { $0.unavailableReason == nil }, name: { "\($0.name) · up to \(sizeText($0.maximumBytes))" })
+            let software = try choose(await engine.availableSoftware(), name: { "\($0.name) · requires \(sizeText($0.minimumBytes))" })
             let amount = try parseSize(prompt("Space for Gravity Linux", default: "\(min(target.maximumBytes, max(120_000_000_000, software.recommendedBytes)))B"))
             let name = try prompt("Startup volume name", default: "Gravity Linux")
             let plan = try await engine.plan(InstallSelection(targetID: target.id, softwareID: software.id, bytes: amount, name: name))
@@ -146,6 +149,7 @@ enum TerminalClient {
                 case "privilegedSession": result = ["pid": try await engine.authorizationStatus()]
                 case "checkBoardSupport": result = try output.value(await engine.checkBoardSupport())
                 case "inspect": result = try output.value(await engine.inspect())
+                case "listSoftware": result = try output.value(await engine.availableSoftware())
                 case "plan": guard let selection = request.selection else { throw InstallerError("selection is required") }; result = try output.value(await engine.plan(selection))
                 case "installReviewed": guard let plan = request.reviewedPlan else { throw InstallerError("reviewedPlan is required") }; try await engine.installReviewed(plan, credentials: auth()); result = ["status": "restartRequired"]
                 case "maintainReviewed": guard let plan = request.reviewedMaintenance else { throw InstallerError("reviewedMaintenance is required") }; try await engine.maintainReviewed(plan, credentials: auth()); result = ["status": "done"]
