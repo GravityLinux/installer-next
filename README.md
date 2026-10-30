@@ -107,8 +107,8 @@ The UI uses the design's Geist fonts, shipped under the bundled font license.
 Preview rendering also checks the real Developer Options window for extra
 title-bar space and verifies that Done leaves the installer open even when the
 installer has keyboard focus. Developer Options sizes itself to its contents.
-It also sends native mouse events to the partition divider, gray segment and
-slider to verify that all three update the same allocation.
+It also sends native mouse events to the partition divider and gray segment,
+and exercises the slider control to verify all three update the same allocation.
 `gravity-installer --check-window-close /tmp/window-close.json` runs a separate
 demo process that verifies the red close button cannot hide an active install
 and quits an idle installer even with Developer Options open. It must exit

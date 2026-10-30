@@ -66,12 +66,15 @@ import GravityCore
         print("Rendered twenty-four demo views to \(directory.path)")
     }
     private static func checkPartitionDrag(model: InstallerModel, directory: URL) async throws {
-        let host = NSHostingView(rootView: PartitionControlsCheck(model: model).frame(width: 600, height: 128))
-        let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 600, height: 128), styleMask: [.borderless], backing: .buffered, defer: false)
+        let frames = PartitionControlFrames()
+        let host = NSHostingView(rootView: PartitionControlsCheck(model: model, frames: frames))
+        let window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 600, height: 128), styleMask: [.titled], backing: .buffered, defer: false)
+        window.title = "Partition interaction check"
         window.isReleasedWhenClosed = false; window.contentView = host
         window.makeKeyAndOrderFront(nil); host.layoutSubtreeIfNeeded()
         defer { window.close() }
         try await Task.sleep(nanoseconds: 150_000_000)
+        guard window.isKeyWindow else { throw InstallerError("The partition interaction window did not receive keyboard focus") }
         func drag(from: CGFloat, to: CGFloat, y: CGFloat) async throws {
             for (index, type) in [NSEvent.EventType.leftMouseDown, .leftMouseDragged, .leftMouseUp].enumerated() {
                 guard let event = NSEvent.mouseEvent(with: type, location: NSPoint(x: index == 0 ? from : to, y: y), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: index, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1) else { throw InstallerError("Could not create a partition drag event") }
@@ -85,10 +88,22 @@ import GravityCore
         try await drag(from: 100, to: 220, y: 90)
         guard model.macOSGB == 80 && model.target!.unusedBytes(for: model.allocationBytes) > 0 else { throw InstallerError("Dragging the gray segment right did not leave unused space") }
         let beforeSlider = model.allocationBytes
-        let thumb = CGFloat(model.partitionBoundaryGB / model.partitionTotalGB) * 580 + 10
-        try await drag(from: thumb, to: thumb-40, y: 20)
-        guard model.allocationBytes > beforeSlider else { throw InstallerError("Dragging the slider did not update the shared diagram value") }
-        try JSONSerialization.data(withJSONObject: ["dividerDragUpdatesAllocation": true, "graySegmentDragLeavesUnusedSpace": true, "sliderDragUpdatesDiagram": true], options: [.prettyPrinted, .sortedKeys]).write(to: directory.appendingPathComponent("partition-drag-check.json"))
+        guard var sliderRect = frames.slider else { throw InstallerError("The partition slider has not been laid out") }
+        if !host.isFlipped { sliderRect.origin.y = host.bounds.height - sliderRect.maxY }
+        let sliderFrame = host.convert(sliderRect, to: nil)
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap { views($0) } }
+        if let slider = views(host).compactMap({ $0 as? NSSlider }).first {
+            // Posted NSEvents do not reliably drive AppKit slider tracking.
+            // Exercise the native control's real target/action instead.
+            slider.doubleValue -= (slider.maxValue - slider.minValue) * 0.05
+            guard slider.sendAction(slider.action, to: slider.target) else { throw InstallerError("The native slider has no action target") }
+            try await Task.sleep(nanoseconds: 300_000_000)
+        } else {
+            let thumb = sliderFrame.minX + CGFloat(model.partitionBoundaryGB / model.partitionTotalGB) * max(1, sliderFrame.width - 20) + 10
+            try await drag(from: thumb, to: thumb-40, y: sliderFrame.midY)
+        }
+        guard model.allocationBytes > beforeSlider else { throw InstallerError("The slider control did not update the shared diagram value") }
+        try JSONSerialization.data(withJSONObject: ["dividerDragUpdatesAllocation": true, "graySegmentDragLeavesUnusedSpace": true, "sliderControlUpdatesDiagram": true], options: [.prettyPrinted, .sortedKeys]).write(to: directory.appendingPathComponent("partition-drag-check.json"))
         model.sizeGB = Double(model.target!.unallocatedBytes) / 1e9
     }
     private static func checkDeveloperWindow(model: InstallerModel, directory: URL) async throws {
@@ -132,14 +147,21 @@ import GravityCore
     }
 }
 
+@MainActor private final class PartitionControlFrames {
+    var slider: CGRect?
+}
 private struct PartitionControlsCheck: View {
     @ObservedObject var model: InstallerModel
+    let frames: PartitionControlFrames
     var body: some View {
         VStack(spacing: 16) {
             if let target = model.target {
                 PartitionDiagram(target: target, boundaryGB: Binding(get: { model.partitionBoundaryGB }, set: { model.setPartitionBoundaryGB($0) }))
                 PartitionSizeSlider(value: Binding(get: { model.partitionBoundaryGB }, set: { model.setPartitionBoundaryGB($0) }), bounds: 0...model.partitionTotalGB)
+                    .background(GeometryReader { geometry in
+                        Color.clear.onAppear { frames.slider = geometry.frame(in: .named("partition-controls")) }
+                    })
             }
-        }
+        }.frame(width: 600, height: 128).coordinateSpace(name: "partition-controls")
     }
 }
