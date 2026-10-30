@@ -154,7 +154,7 @@ struct J700Firmware: BoardFirmwareLoading {
         events(InstallEvent(.boardFirmware, help: "Extracting the IMX558 camera setfile and saving j700 audio tuning data."))
         let camera = try J700FirmwareCollectors.camera(cameraSource())
         try package.add(camera); try write(camera.data, to: saved.appending(camera.name))
-        events(InstallEvent(.multitouch)); try package.add(Multitouch.files(context.fud))
+        events(InstallEvent(.multitouch)); try package.add(Multitouch.files(context.fud, requireTrackpadFor: "j700"))
         try saveAudio(from: host.appending("System/Library/Audio/Tunings/AID44"), to: saved.appending("audio/AID44"))
         let metadata: [String: Any] = ["version": 1, "board": "j700", "wifi_address": address, "calibration_generated_locally": true,
             "factory_sha256": factoryRecord.1.sha256, "camera_sha256": camera.data.sha256,
@@ -184,7 +184,7 @@ struct J700Firmware: BoardFirmwareLoading {
             else { try require(data.sha256 == J700FirmwareCollectors.bluetoothPayloadSHA256, "Unqualified saved j700 Bluetooth payload") }
             try package.add(FirmwareFile(name: name, data: data))
         }
-        try package.add(Multitouch.files(context.raw.appending("fud_firmware")))
+        try package.add(Multitouch.files(context.raw.appending("fud_firmware"), requireTrackpadFor: "j700"))
     }
     private func saveAudio(from source: URL, to target: URL) throws {
         try require(fm.fileExists(atPath: source.path), "j700 AID44 audio tuning is missing")

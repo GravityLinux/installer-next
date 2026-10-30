@@ -3,7 +3,7 @@ import Foundation
 import CoreFoundation
 
 enum Multitouch {
-    static func files(_ root: URL) throws -> [FirmwareFile] {
+    static func files(_ root: URL, requireTrackpadFor requiredMachine: String? = nil) throws -> [FirmwareFile] {
         var files: [FirmwareFile] = []
         for machine in try fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) where machine.lastPathComponent.hasPrefix("j") {
             let path = machine.appending("Multitouch.im4p")
@@ -30,13 +30,18 @@ enum Multitouch {
             let values = try plist(XMLDocument(rootElement: wrapper).xmlData)
             var collected = Set<String>()
             for (key, value) in values {
-                let trackpad = key.hasPrefix("C1FD"), touchbar = key.hasPrefix("C1FB")
+                // J700 uses the C1FE family with the same HIDF packaging.
+                let trackpad = key.hasPrefix("C1FD") || key.hasPrefix("C1FE"), touchbar = key.hasPrefix("C1FB")
                 if !trackpad && !touchbar { continue }
                 let name = "apple/\(trackpad ? "tpmtfw" : "dfrmtfw")-\(machine.lastPathComponent).bin"
                 try require(collected.insert(name).inserted, "Duplicate multitouch firmware")
                 let payload = try trackpad ? trackpadBinary(array(value)) : touchbarBinary(array(value))
                 files.append(FirmwareFile(name: name, data: payload))
             }
+        }
+        if let requiredMachine {
+            try require(files.contains { $0.name == "apple/tpmtfw-\(requiredMachine).bin" },
+                        "Missing trackpad firmware for \(requiredMachine)")
         }
         return files.sorted { $0.name < $1.name }
     }
