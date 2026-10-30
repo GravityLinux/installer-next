@@ -1,6 +1,6 @@
 id,group,current_surface,trigger,disk_state,user_actions,design_notes
 startup.unsupported,Startup,Unsupported-board screen,No exact board/chip match,unchanged,Quit; check again,Dedicated design; show product number
-startup.developer-board,Startup,Unsupported-board variant,Matching profile is developer-only,unchanged,Developer Options; quit,Dedicated developer-gate design
+startup.developer-board,Startup,Developer-gated board placeholder,Matching profile is developer-only,unchanged,Developer Options; quit,Needs design pass: current This board requires developer mode screen is not approved; redesign its presentation and entry flow
 startup.os-too-old,Startup,Startup failure placeholder,Host macOS below board minimum,unchanged,Quit; update macOS; retry,Explain minimum and current versions
 startup.hardware-unreadable,Startup,Startup failure placeholder,IORegistry or boot environment cannot be read,unchanged,Retry; copy details; quit,Distinguish probe failure from unsupported hardware
 startup.owner-unavailable,Startup,Startup failure placeholder,Primary macOS or machine-owner records cannot be identified,unchanged,Return to primary macOS; retry,No early credential screen

@@ -126,8 +126,17 @@ experimental-board access, Linux-image CRC bypass, detailed logging and local
 download retention. Apple recovery hashes, firmware validation, archive bounds
 and board identity checks always apply. Retained archive ranges are private to
 this Mac and reused only when the server validator and length still match.
-Shrinking is shown with an explanation when APFS limits or the macOS free-space
-reserve make it unavailable; existing unallocated space remains selectable.
+The partition screen automatically includes all unallocated space immediately
+after macOS. Its slider adds space by shrinking macOS further; no separate
+storage-choice rows are shown. The default leaves **2 GB free inside macOS**,
+subject to APFS's reported hard minimum. The preferred-size recommendation does
+not impose an additional reserve. Using only the existing free extent does not
+run a macOS resize. UEFI/bootloader-only modes retain their stub/ESP-only layouts
+and leave the rest free for a future OS.
+
+The current developer-gated board screen is an unapproved placeholder awaiting a
+design pass; its presentation and entry flow are tracked in the exception-state
+inventory. Board gating remains in place pending that design work.
 
 ## Board support and firmware qualification
 

@@ -3,7 +3,7 @@ reference,view,correction,verification,content_variations
 1b,Existing installation,Divider-separated repair/upgrade/uninstall rows and bottom note,Native render,Actual installation identity and supported maintenance actions
 2,Welcome,Geist fonts; exact colors; 216-point sidebar; device card and instruction spacing,Native render,Product number and board-specific status; no invented download size or duration
 Sheet,Safety,560-point top-attached panel; shield; three compact explanations; footer,Native render,Guide link uses the configured documentation placeholder
-3,Partition,72-point labeled partition diagram; used-space shading; inline slider and value; bottom notice,Native render and core resize-plan checks,Live APFS limits; disabled shrink explanation and free-space selection
+3,Partition,72-point labeled partition diagram; used-space shading; inline slider and value; bottom notice,Native render and core resize-plan checks,All adjacent unallocated space included automatically; slider adds macOS shrink; 2 GB margin; no storage-choice rows
 4,Desktop,Equal desktop cards; matching thumbnails; radio rows and blue recommendation,Native render and live candidate tests,Only compatible published images; release labels use actual metadata
 5,Review,10-point allocation bar and three-row detail table; bottom credential explanation,Native render and plan-identity tests,Free-space and bootloader-only plans describe their actual changes
 6,Installing,Centered heading; thin progress bar; step caption; help and details link; disabled footer,Native render,Actual step-specific help and progress; no fabricated ETA
@@ -16,3 +16,4 @@ Dev menu,App menu,Native Developer Options menu item and Option-Command-D shortc
 Dev off,Developer Options disabled,Content-sized separate window; unchecked opt-in; Done footer,Native render and default-policy tests,Release channel does not automatically enable developer mode
 Dev on,Developer Options enabled,Content-sized expanded window with all reference controls,Native render; window close/size check; developer-option tests,Checksum bypass affects Linux images; Apple verification stays enabled
 Dev software,Desktop in developer mode,Top-right title-bar badge and extra tethered-boot row,Native render,Experimental hardware still requires explicit opt-in and a compiled profile
+Pending,Developer-gated board,Current This board requires developer mode screen needs a design pass,Not approved,Redesign presentation and entry flow; retain the gate meanwhile

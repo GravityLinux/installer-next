@@ -131,6 +131,11 @@ public struct StorageTarget: Codable, Identifiable, Equatable, Sendable {
     public let freeBytes: Int64
     public let maximumBytes: Int64
     public var unavailableReason: String? = nil
+    public var existingFreeBytes: Int64? = nil
+    public var unallocatedBytes: Int64 { kind == "free" ? alignDown(totalBytes) : existingFreeBytes ?? 0 }
+    public var diagramTotalBytes: Int64 { totalBytes + (kind == "resize" ? unallocatedBytes : 0) }
+    public func shrinkBytes(for allocation: Int64) -> Int64 { kind == "resize" ? max(0, allocation - unallocatedBytes) : 0 }
+    public func boundedAllocation(_ requestedBytes: Int64) -> Int64 { min(maximumBytes, max(unallocatedBytes, alignDown(requestedBytes))) }
 }
 public struct ExistingInstallation: Codable, Identifiable, Sendable {
     public let id: String
@@ -148,7 +153,7 @@ public struct Inspection: Codable, Sendable {
     public let existing: [ExistingInstallation]
     public var board: BoardPresentation? = nil
     public var boardProfileID: String? = nil
-    public var macOSReserveBytes: Int64 = 40_000_000_000
+    public var macOSReserveBytes: Int64 = BoardStoragePolicy.defaultMacOSReserveBytes
 }
 public struct InstallSelection: Codable, Equatable, Sendable {
     public var targetID: String
@@ -171,7 +176,7 @@ public struct InstallPlan: Codable, Identifiable, Sendable {
 
     public func hasSameReview(as other: InstallPlan) -> Bool {
         selection == other.selection && target.id == other.target.id && target.kind == other.target.kind
-            && target.name == other.target.name && target.totalBytes == other.target.totalBytes && software == other.software
+            && target.name == other.target.name && target.totalBytes == other.target.totalBytes && target.unallocatedBytes == other.target.unallocatedBytes && software == other.software
             && macOSAfterBytes == other.macOSAfterBytes && changes == other.changes && fingerprint == other.fingerprint && policyFingerprint == other.policyFingerprint
     }
 }

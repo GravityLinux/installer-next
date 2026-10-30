@@ -28,10 +28,11 @@ public struct BoardPresentation: Codable, Sendable {
 public enum BoardAvailability: String, Codable, Sendable { case standard, developer }
 
 public struct BoardStoragePolicy: Sendable {
+    public static let defaultMacOSReserveBytes: Int64 = 2_000_000_000
     public let stubBytes: Int64
     public let macOSReserveBytes: Int64
     public let minimumLinuxBytes: Int64
-    public init(stubBytes: Int64 = 2_500_000_000, macOSReserveBytes: Int64 = 40_000_000_000, minimumLinuxBytes: Int64 = 30_000_000_000) {
+    public init(stubBytes: Int64 = 2_500_000_000, macOSReserveBytes: Int64 = BoardStoragePolicy.defaultMacOSReserveBytes, minimumLinuxBytes: Int64 = 30_000_000_000) {
         self.stubBytes = alignDown(stubBytes); self.macOSReserveBytes = macOSReserveBytes; self.minimumLinuxBytes = minimumLinuxBytes
     }
 }

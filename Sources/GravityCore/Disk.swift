@@ -220,7 +220,8 @@ final class DiskManager {
     func maximumResize(_ part: DiskPartition, reserveBytes: Int64) throws -> Int64 {
         let limits = try get(["apfs", "resizeContainer", part.name, "limits", "-plist"])
         let total = int(part.container["CapacityCeiling"]), free = int(part.container["CapacityFree"])
-        let minimum = alignUp(max(alignUp(total - free + reserveBytes), int(limits["MinimumSizePreferred"])))
+        let hardMinimum = int(limits["MinimumSizeNoGuard"] ?? limits["MinimumSizePreferred"])
+        let minimum = alignUp(max(alignUp(total - free + reserveBytes), hardMinimum))
         return max(0, alignDown(total - minimum))
     }
 }

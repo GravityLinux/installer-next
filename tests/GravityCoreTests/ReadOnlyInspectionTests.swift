@@ -38,7 +38,7 @@ private final class ReadOnlyInspectionCommands: CommandRunning, @unchecked Senda
                     "CapacityFree": capacityFree, "Volumes": [system, data, preboot, recovery]]]]
             case ["apfs", "listVolumeGroups", "disk3", "-plist"]:
                 value = ["Containers": [["VolumeGroups": [["APFSVolumeGroupUUID": group, "Volumes": [["DeviceIdentifier": "disk3s1", "Role": "System"], ["DeviceIdentifier": "disk3s2", "Role": "Data"]]]]]]]
-            case ["apfs", "resizeContainer", "disk0s2", "limits", "-plist"]: value = ["MinimumSizePreferred": 300_000_000_000]
+            case ["apfs", "resizeContainer", "disk0s2", "limits", "-plist"]: value = ["MinimumSizeNoGuard": 300_000_000_000, "MinimumSizePreferred": 350_000_000_000]
             case ["info", "-plist", "/"]: value = ["APFSSnapshot": true, "APFSVolumeGroupID": group]
             case ["info", "-plist", "disk0"]: value = ["Internal": true, "VirtualOrPhysical": "Physical", "Content": "GUID_partition_scheme"]
             case ["info", "-plist", "disk0s1"]: value = ["DeviceIdentifier": "disk0s1", "PartitionMapPartitionOffset": 20480, "Size": 500_000_000, "Content": "Apple_APFS_ISC", "DiskUUID": "isc"]
@@ -69,11 +69,24 @@ private final class ReadOnlyInspectionCommands: CommandRunning, @unchecked Senda
     #expect(!fm.fileExists(atPath: catalog.path)) // Startup cannot have queried this missing source.
     try write(Data("{\"os_list\":[]}".utf8), to: catalog)
     let choices = try await engine.availableSoftware()
-    let plan = try await engine.plan(InstallSelection(targetID: target.id, softwareID: choices[0].id, bytes: 5_000_000_000))
+    #expect(info.macOSReserveBytes == 2_000_000_000)
+    #expect(target.unallocatedBytes > 0 && info.targets.count == 1)
+    let plan = try await engine.plan(InstallSelection(targetID: target.id, softwareID: choices[0].id, bytes: target.unallocatedBytes))
     #expect(plan.fingerprint != nil && plan.software.mode == .bootloader)
+    #expect(plan.macOSAfterBytes == nil && plan.changes.first == "Use existing unallocated space")
+    let extra = alignDown(5_000_000_000)
+    let larger = try await engine.plan(InstallSelection(targetID: target.id, softwareID: choices[0].id, bytes: target.unallocatedBytes + extra))
+    #expect(larger.macOSAfterBytes == alignDown(target.totalBytes - extra))
+    await #expect(throws: (any Error).self) {
+        try await engine.plan(InstallSelection(targetID: target.id, softwareID: choices[0].id, bytes: target.unallocatedBytes - 1_048_576))
+    }
     #expect(!commands.calls.contains { $0.0.hasSuffix("bputil") || $0.1.first == "mount" })
     commands.capacityFree = 5_000_000_000
+    let smallerMargin = try await engine.inspect()
+    let shrinkable = try #require(smallerMargin.targets.first { $0.kind == "resize" })
+    #expect(shrinkable.maximumBytes > shrinkable.unallocatedBytes)
+    commands.capacityFree = 1_000_000_000
     let constrained = try await engine.inspect()
     let resize = try #require(constrained.targets.first { $0.kind == "resize" })
-    #expect(resize.maximumBytes == 0 && resize.unavailableReason?.contains("40 GB") == true)
+    #expect(resize.maximumBytes == resize.unallocatedBytes && resize.unavailableReason == nil)
 }

@@ -36,12 +36,16 @@ import GravityCore
         try await fittingSnapshot(DeveloperOptionsView(model: model, previewEnabled: false), to: directory.appendingPathComponent("developer-options-off.png"))
         try await fittingSnapshot(DeveloperOptionsView(model: model, previewEnabled: true), to: directory.appendingPathComponent("developer-options-on.png"))
         model.screen = .storage; model.inspection = try changing(inspection, ["targets": [
-            ["id": "demo-no-shrink", "name": "Macintosh HD", "kind": "resize", "totalBytes": 80_000_000_000, "freeBytes": 5_000_000_000, "maximumBytes": 0,
-             "unavailableReason": "macOS has 5 GB free. At least 40 GB must remain free after shrinking. Free space in macOS to enable this option."],
-            ["id": "demo-free", "name": "Available space after disk0s2", "kind": "free", "totalBytes": 80_000_000_000, "freeBytes": 80_000_000_000, "maximumBytes": 79_999_000_000]]])
-        model.targetID = "demo-free"; model.sizeGB = 60
+            ["id": "demo-no-shrink", "name": "Macintosh HD", "kind": "resize", "totalBytes": 80_000_000_000, "freeBytes": 5_000_000_000, "maximumBytes": 79_999_008_768,
+             "existingFreeBytes": 79_999_008_768]]])
+        model.targetID = "demo-no-shrink"; model.sizeGB = Double(model.target!.unallocatedBytes) / 1e9
         try await snapshot(InstallerView(model: model), size: NSSize(width: 880, height: 600), to: directory.appendingPathComponent("storage-no-shrink.png"))
-        print("Rendered nineteen demo views to \(directory.path)")
+        model.inspection = try changing(model.inspection!, ["targets": [["id": "demo-no-shrink", "name": "Macintosh HD", "kind": "resize", "totalBytes": 80_000_000_000, "freeBytes": 20_000_000_000,
+            "maximumBytes": 97_998_307_328, "existingFreeBytes": 79_999_008_768]]])
+        try await snapshot(InstallerView(model: model), size: NSSize(width: 880, height: 600), to: directory.appendingPathComponent("storage-existing-space.png"))
+        model.sizeGB = 90
+        try await snapshot(InstallerView(model: model), size: NSSize(width: 880, height: 600), to: directory.appendingPathComponent("storage-extra-shrink.png"))
+        print("Rendered twenty-one demo views to \(directory.path)")
     }
     private static func checkDeveloperWindow(model: InstallerModel, directory: URL) async throws {
         guard let installer = NSApp.windows.first(where: { $0.isVisible && $0.title == "Install Gravity Linux" }) else { throw InstallerError("The installer window is missing") }

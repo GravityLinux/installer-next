@@ -70,7 +70,7 @@ private typealias T = InstallerTheme
     }
     private var horizontalPadding: CGFloat { [.installing, .finalize, .complete].contains(model.screen) ? 72 : model.screen == .restart ? 48 : 56 }
     private var topPadding: CGFloat { model.screen == .software ? 36 : model.screen == .restart ? 34 : 40 }
-    private var bottomPadding: CGFloat { model.screen == .restart ? 12 : model.screen == .storage && (model.inspection?.targets.count ?? 0) > 1 ? 16 : model.screen == .software ? 20 : 24 }
+    private var bottomPadding: CGFloat { model.screen == .restart ? 12 : model.screen == .software ? 20 : 24 }
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 32) {
             Text("gravity").font(T.font(20, .semibold)).tracking(-0.2)
@@ -154,17 +154,16 @@ private typealias T = InstallerTheme
         }
     }
     private var storage: some View {
-        VStack(alignment: .leading, spacing: (model.inspection?.targets.count ?? 0) > 1 ? 16 : 28) {
-            heading("How much space for Gravity Linux?", model.target?.kind == "free" ? "Use existing unallocated space for Gravity Linux." : "Shrink your macOS partition to make space for Gravity Linux.")
-            if (model.inspection?.targets.count ?? 0) > 1 { storageChoices }
+        VStack(alignment: .leading, spacing: 28) {
+            heading("How much space for Gravity Linux?", storageSubtitle)
             if let target = model.target, model.maximumGB >= model.minimumGB, target.unavailableReason == nil {
                 VStack(alignment: .leading, spacing: 10) {
-                    HStack { Text(target.name); Spacer(); Text(sizeText(target.totalBytes)) }.font(T.font(12)).foregroundStyle(T.muted)
+                    HStack { Text(target.name); Spacer(); Text(sizeText(target.diagramTotalBytes)) }.font(T.font(12)).foregroundStyle(T.muted)
                     storageBar(target)
                     HStack(spacing: 16) {
                         Text("Partition size").font(T.font(13, .medium)).fixedSize()
                         PartitionSizeSlider(value: $model.sizeGB, bounds: model.minimumGB...max(model.minimumGB, model.maximumGB))
-                        Text("\(Int(model.sizeGB)) GB").font(T.mono(13)).frame(width: 64, alignment: .trailing)
+                        Text(sizeText(model.allocationBytes)).font(T.mono(13)).frame(width: 64, alignment: .trailing)
                     }.padding(.top, 10)
                     Text(storageHelp).font(T.font(12)).foregroundStyle(T.muted).lineSpacing(2)
                 }
@@ -175,31 +174,23 @@ private typealias T = InstallerTheme
             note("Nothing on your disk changes yet.", detail: "You’ll review every change before anything happens.", icon: "lock", inline: true)
         }
     }
-    private var storageChoices: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(model.inspection?.targets ?? []) { target in
-                VStack(alignment: .leading, spacing: 3) {
-                    Button { model.targetID = target.id; model.clampSize() } label: {
-                        HStack(alignment: .top, spacing: 10) {
-                        radio(selected: model.targetID == target.id).padding(.top, 2)
-                            Text(target.kind == "resize" ? "Shrink macOS · \(target.name)" : "Use unallocated space · \(sizeText(target.totalBytes))").font(T.font(13, .medium))
-                        Spacer(minLength: 0)
-                    }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                    }.buttonStyle(.plain).disabled(target.unavailableReason != nil)
-                    if let reason = target.unavailableReason { Text(reason).font(T.font(12)).foregroundStyle(T.muted).fixedSize(horizontal: false, vertical: true).padding(.leading, 25) }
-                }
-            }
-        }
+    private var storageSubtitle: String {
+        guard let target = model.target, target.unallocatedBytes > 0 else { return "Shrink your macOS partition to make space for Gravity Linux." }
+        return target.maximumBytes > target.unallocatedBytes
+            ? "Existing unallocated space is included. Shrink macOS to make more room."
+            : "Use existing unallocated space for Gravity Linux."
     }
     private var storageHelp: String {
-        if model.target?.kind == "free" { return "At least \(Int(model.minimumGB)) GB. macOS keeps its current partition size." }
-        return "At least \(Int(model.minimumGB)) GB. We always leave macOS \(sizeText(model.inspection?.macOSReserveBytes ?? 40_000_000_000)) free so it can keep updating."
+        if let target = model.target, target.unallocatedBytes > 0 && target.maximumBytes == target.unallocatedBytes {
+            return "All \(sizeText(target.unallocatedBytes)) of unallocated space is included. APFS currently doesn’t allow macOS to shrink further."
+        }
+        return "At least \(sizeText(Int64(model.minimumGB * 1e9))). We leave at least \(sizeText(model.inspection?.macOSReserveBytes ?? BoardStoragePolicy.defaultMacOSReserveBytes)) free inside macOS."
     }
     private func storageBar(_ target: StorageTarget) -> some View {
-        let linux = Int64(model.sizeGB * 1e9), left = max(0, target.totalBytes - linux)
+        let linux = model.allocationBytes, left = max(0, target.diagramTotalBytes - linux)
         let used = target.kind == "free" ? 0 : max(0, target.totalBytes - target.freeBytes)
         return GeometryReader { g in
-            let width = max(0, g.size.width * CGFloat(left) / CGFloat(max(1, target.totalBytes)))
+            let width = max(0, g.size.width * CGFloat(left) / CGFloat(max(1, target.diagramTotalBytes)))
             HStack(spacing: 6) {
                 ZStack(alignment: .leading) {
                     T.surface
@@ -252,14 +243,14 @@ private typealias T = InstallerTheme
             if let plan = model.plan {
                 GeometryReader { g in
                     HStack(spacing: 4) {
-                        T.hairline.clipShape(RoundedRectangle(cornerRadius: 5)).frame(width: max(0, (g.size.width-4) * CGFloat(max(0, plan.target.totalBytes-plan.selection.bytes)) / CGFloat(max(1, plan.target.totalBytes))))
+                        T.hairline.clipShape(RoundedRectangle(cornerRadius: 5)).frame(width: max(0, (g.size.width-4) * CGFloat(max(0, plan.target.diagramTotalBytes-plan.selection.bytes)) / CGFloat(max(1, plan.target.diagramTotalBytes))))
                         T.accent.clipShape(RoundedRectangle(cornerRadius: 5))
                     }
                 }.frame(height: 10)
                 VStack(spacing: 0) {
                     T.hairline.frame(height: 1)
                     reviewRow(plan.target.kind == "resize" ? "macOS" : "Storage",
-                        plan.macOSAfterBytes.map { "Shrinks from \(sizeText(plan.target.totalBytes)) to \(sizeText($0))" } ?? "Use existing unallocated space",
+                        plan.macOSAfterBytes.map { "Shrinks from \(sizeText(plan.target.totalBytes)) to \(sizeText($0))" } ?? (plan.target.kind == "resize" ? "Keeps its current \(sizeText(plan.target.totalBytes)) size" : "Use existing unallocated space"),
                         detail: plan.target.kind == "resize" ? "Your files, apps and settings stay exactly as they are" : "macOS keeps its current partition size")
                     reviewRow("Gravity Linux", "New \(sizeText(plan.selection.bytes)) space")
                     reviewRow("Software", plan.software.name)

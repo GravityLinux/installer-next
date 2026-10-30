@@ -48,10 +48,10 @@ enum Screen: Int { case checking = -1, welcome, storage, software, review, insta
         engine = InstallerSession(configuration: configuration) { [weak self] event in Task { @MainActor in self?.receive(event) } }
     }
     func applyDeveloperOptions(enabled: Bool, options: DeveloperOptions) async {
-        let previous = screen, oldTarget = targetID, oldSoftware = softwareID
+        let previous = screen, oldTarget = targetID, oldSoftware = softwareID, oldSize = sizeGB
         developer = enabled; developerOptions = options; developerSheet = false; createEngine(); await load()
         if inspection != nil && [.welcome, .storage, .software].contains(previous) {
-            if inspection?.targets.contains(where: { $0.id == oldTarget && $0.unavailableReason == nil }) == true { targetID = oldTarget }
+            if inspection?.targets.contains(where: { $0.id == oldTarget && $0.unavailableReason == nil }) == true { targetID = oldTarget; sizeGB = oldSize }
             if inspection?.software.contains(where: { $0.id == oldSoftware }) == true { softwareID = oldSoftware }
             clampSize(); screen = previous
             if previous == .software { await chooseSoftware() }
@@ -68,8 +68,9 @@ enum Screen: Int { case checking = -1, welcome, storage, software, review, insta
     var target: StorageTarget? { inspection?.targets.first { $0.id == targetID } }
     var software: Software? { inspection?.software.first { $0.id == softwareID } }
     var board: BoardPresentation? { inspection?.board ?? stage2?.board }
-    var minimumGB: Double { ceil(Double(software?.minimumBytes ?? 30_000_000_000) / 1e9) }
-    var maximumGB: Double { floor(Double(target?.maximumBytes ?? 0) / 1e9) }
+    var minimumGB: Double { max(ceil(Double(software?.minimumBytes ?? 30_000_000_000) / 1e9), Double(target?.unallocatedBytes ?? 0) / 1e9) }
+    var maximumGB: Double { Double(target?.maximumBytes ?? 0) / 1e9 }
+    var allocationBytes: Int64 { target?.boundedAllocation(Int64((sizeGB * 1e9).rounded())) ?? Int64((sizeGB * 1e9).rounded()) }
     var active: Int {
         switch screen {
         case .storage: return 1
@@ -97,6 +98,7 @@ enum Screen: Int { case checking = -1, welcome, storage, software, review, insta
                 let info = try await engine.inspect(); inspection = info
                 softwareID = info.software.first?.id ?? ""
                 targetID = info.targets.first(where: { $0.unavailableReason == nil && $0.maximumBytes >= (software?.minimumBytes ?? 30_000_000_000) })?.id ?? info.targets.first?.id ?? ""
+                if let target, target.unallocatedBytes > 0 { sizeGB = Double(target.unallocatedBytes) / 1e9 }
                 username = info.administrator; selectedExisting = info.existing.first?.id ?? ""
                 clampSize(); screen = info.existing.isEmpty ? .welcome : .existing
             }
@@ -119,7 +121,7 @@ enum Screen: Int { case checking = -1, welcome, storage, software, review, insta
         busy = true; defer { busy = false }
         do {
             maintenance = nil
-            plan = try await engine.plan(InstallSelection(targetID: targetID, softwareID: softwareID, bytes: Int64(sizeGB * 1e9), name: volumeName))
+            plan = try await engine.plan(InstallSelection(targetID: targetID, softwareID: softwareID, bytes: allocationBytes, name: volumeName))
             screen = .review
         } catch { self.error = error.localizedDescription }
     }

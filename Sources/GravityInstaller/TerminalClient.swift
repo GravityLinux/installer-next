@@ -109,7 +109,8 @@ enum TerminalClient {
             for target in info.targets where target.unavailableReason != nil { print("\(target.name): \(target.unavailableReason!)") }
             let target = try choose(info.targets.filter { $0.unavailableReason == nil }, name: { "\($0.name) · up to \(sizeText($0.maximumBytes))" })
             let software = try choose(await engine.availableSoftware(), name: { "\($0.name) · requires \(sizeText($0.minimumBytes))" })
-            let amount = try parseSize(prompt("Space for Gravity Linux", default: "\(min(target.maximumBytes, max(120_000_000_000, software.recommendedBytes)))B"))
+            let suggested = target.unallocatedBytes > 0 ? max(target.unallocatedBytes, software.minimumBytes) : max(120_000_000_000, software.recommendedBytes)
+            let amount = try parseSize(prompt("Space for Gravity Linux", default: "\(min(target.maximumBytes, suggested))B"))
             let name = try prompt("Startup volume name", default: "Gravity Linux")
             let plan = try await engine.plan(InstallSelection(targetID: target.id, softwareID: software.id, bytes: amount, name: name))
             print("\nReview and install")

@@ -58,20 +58,24 @@ public actor InstallerEngine {
     }
     private func targets(_ scan: Scan) throws -> [StorageTarget] {
         var result: [StorageTarget] = []
-        for part in scan.partitions {
-            if part.free && part.size >= scan.board.storage.stubBytes {
-                result.append(StorageTarget(id: part.id, name: "Available space after \(part.name)", kind: "free", totalBytes: part.size, freeBytes: part.size, maximumBytes: alignDown(part.size)))
-            } else if part.uuid == scan.current.partition.uuid {
-                let maximum = try scan.disk.maximumResize(part, reserveBytes: scan.board.storage.macOSReserveBytes)
-                let free = int(part.container["CapacityFree"])
-                var target = StorageTarget(id: part.id, name: scan.current.label, kind: "resize", totalBytes: part.size, freeBytes: free, maximumBytes: maximum)
-                if maximum < scan.board.storage.stubBytes {
-                    target.unavailableReason = free < scan.board.storage.macOSReserveBytes
-                        ? "macOS has \(sizeText(free)) free. At least \(sizeText(scan.board.storage.macOSReserveBytes)) must remain free after shrinking. Free space in macOS to enable this option."
-                        : "APFS cannot currently shrink this volume enough for an installation. Free space or review local snapshots, then check again."
-                }
-                result.append(target)
+        var includedFree: String?
+        for (index, part) in scan.partitions.enumerated() where part.uuid == scan.current.partition.uuid {
+            let adjacent = scan.partitions.indices.contains(index + 1) && scan.partitions[index + 1].free ? scan.partitions[index + 1] : nil
+            let existing = adjacent.map { alignDown($0.size) } ?? 0
+            includedFree = adjacent?.id
+            let maximum = existing + (try scan.disk.maximumResize(part, reserveBytes: scan.board.storage.macOSReserveBytes))
+            let free = int(part.container["CapacityFree"])
+            var target = StorageTarget(id: part.id, name: scan.current.label, kind: "resize", totalBytes: part.size, freeBytes: free, maximumBytes: maximum)
+            target.existingFreeBytes = existing
+            if maximum < scan.board.storage.stubBytes {
+                target.unavailableReason = free < scan.board.storage.macOSReserveBytes
+                    ? "macOS has \(sizeText(free)) free. At least \(sizeText(scan.board.storage.macOSReserveBytes)) must remain free after shrinking. Free space in macOS to enable this option."
+                    : "APFS cannot currently shrink this volume enough for an installation. Free space or review local snapshots, then check again."
             }
+            result.append(target)
+        }
+        for part in scan.partitions where part.free && part.id != includedFree && part.size >= scan.board.storage.stubBytes {
+            result.append(StorageTarget(id: part.id, name: "Available space after \(part.name)", kind: "free", totalBytes: part.size, freeBytes: part.size, maximumBytes: alignDown(part.size)))
         }
         return result
     }
@@ -111,9 +115,12 @@ public actor InstallerEngine {
         var selection = selection; selection.bytes = alignDown(selection.bytes)
         selection.name = selection.name.trimmingCharacters(in: .whitespacesAndNewlines)
         try require(!selection.name.isEmpty && selection.name.utf8.count <= 64 && !selection.name.contains("/") && !selection.name.unicodeScalars.contains { $0.value < 32 }, "Choose a volume name of at most 64 bytes without slashes or control characters")
-        try require(selection.bytes >= software.minimumBytes && selection.bytes <= target.maximumBytes, "Choose an installation size between \(sizeText(software.minimumBytes)) and \(sizeText(target.maximumBytes))")
-        let after = target.kind == "resize" ? alignDown(target.totalBytes - selection.bytes) : nil
+        let minimum = max(alignDown(software.minimumBytes), target.unallocatedBytes)
+        try require(selection.bytes >= minimum && selection.bytes <= target.maximumBytes, "Choose an installation size between \(sizeText(minimum)) and \(sizeText(target.maximumBytes))")
+        let shrink = target.shrinkBytes(for: selection.bytes)
+        let after = shrink > 0 ? alignDown(target.totalBytes - shrink) : nil
         var changes = [after.map { "Shrink \(target.name) from \(sizeText(target.totalBytes)) to \(sizeText($0))" } ?? "Use existing unallocated space"]
+        if after != nil && target.unallocatedBytes > 0 { changes.append("Include all \(sizeText(target.unallocatedBytes)) of existing adjacent unallocated space") }
         if software.mode == .linux {
             changes += ["Create the startup and Linux partitions for \(software.name)"]
             let fixed = layoutBytes ?? software.minimumBytes
@@ -159,12 +166,15 @@ public actor InstallerEngine {
         guard let selected = fresh.partitions.first(where: { $0.id == plan.selection.targetID }), let target = try targets(fresh).first(where: { $0.id == selected.id }) else { throw InstallerError("Selected space no longer exists") }
         try require(plan.selection.bytes <= target.maximumBytes, "Available space changed; review a smaller installation")
         var after = selected.name
-        if target.kind == "resize" {
-            events(InstallEvent(.resize)); _ = try fresh.disk.action(["apfs", "resizeContainer", selected.name, String(alignDown(selected.size - plan.selection.bytes))])
+        let shrink = target.shrinkBytes(for: plan.selection.bytes)
+        if shrink > 0 {
+            events(InstallEvent(.resize)); _ = try fresh.disk.action(["apfs", "resizeContainer", selected.name, String(alignDown(selected.size - shrink))])
             try fresh.disk.refresh()
             guard let free = try fresh.disk.partitions(fresh.name).first(where: { $0.free && $0.name == selected.name }) else { throw InstallerError("Resize completed but no adjacent free space was found; check the disk before continuing") }
             try require(free.size >= plan.selection.bytes, "The freed space is smaller than the reviewed installation")
             after = free.name
+        } else if target.kind == "resize" {
+            try require(fresh.partitions.contains { $0.free && $0.name == selected.name && $0.size >= plan.selection.bytes }, "Adjacent unallocated space changed; review the installation again")
         }
         events(InstallEvent(.createStub))
         let startup = try fresh.disk.addPartition(after: after, type: "apfs", label: plan.selection.name, size: fresh.board.storage.stubBytes, disk: fresh.name)
@@ -296,7 +306,7 @@ public actor InstallerEngine {
             }.filter { board.installationModes.contains($0.mode) }
         if configuration.developer { software.append(try SoftwareTemplate.bootloaderOnly.software(id: "demo-bootloader", storage: board.storage)) }
         return Inspection(model: board.presentation.productNumber, bootMode: "macOS", administrator: "demo", administrators: ["demo"],
-            targets: [StorageTarget(id: "demo-storage", name: "Macintosh HD", kind: "resize", totalBytes: 494_000_000_000, freeBytes: 352_000_000_000, maximumBytes: 312_000_000_000)],
+            targets: [StorageTarget(id: "demo-storage", name: "Macintosh HD", kind: "resize", totalBytes: 494_000_000_000, freeBytes: 352_000_000_000, maximumBytes: alignDown(352_000_000_000 - board.storage.macOSReserveBytes))],
             software: software, existing: [], board: board.presentation, boardProfileID: board.id, macOSReserveBytes: board.storage.macOSReserveBytes)
     }
 }
