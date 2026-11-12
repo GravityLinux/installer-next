@@ -37,7 +37,7 @@ public actor InstallerEngine {
     private func scan(readOnly: Bool = false) throws -> Scan {
         if !readOnly { try root() }; events(InstallEvent(.inspecting))
         let system = try MacSystem(commands: commands, readOnly: readOnly)
-        let board = try boards.resolve(system.hardware, developer: configuration.boardDeveloper); try system.validate(board: board)
+        let board = try boards.resolve(system.hardware, developer: configuration.boardDeveloper); try system.validate(board: board, commands: commands)
         let disk = DiskManager(commands: commands); try disk.refresh(); let name = try disk.systemDisk(), parts = try disk.partitions(name)
         try require(string(disk.disks[name]?["Content"]) == "GUID_partition_scheme", "The internal disk must use a GUID partition map")
         let systems = try parts.flatMap { try disk.operatingSystems($0, system: system, readOnly: readOnly) }
@@ -250,26 +250,20 @@ public actor InstallerEngine {
         for dest in idata {
             try stub.collectInstallerData(dest)
             try write(JSONEncoder().encode(finishedRecord), to: dest.appending("installation.json"))
-            if let url = log.url { try copy(url, dest.appending("installer.log")) }
         }
         record = finishedRecord; try write(JSONEncoder().encode(record), to: stage2)
         try prepareBoot(os, credentials: credentials, recovery: false)
+        for dest in idata { if let url = log.url { try copy(url, dest.appending("installer.log")) } }
         events(InstallEvent(.restart, fraction: 1))
     }
     private func resolvePackage(_ name: String) throws -> URL {
         try ReleaseCatalog.packageURL(name, repository: configuration.repositoryURL)
     }
     private func prepareBoot(_ os: InstalledOS, credentials: Credentials, recovery: Bool) throws {
-        let core = os.system.appending("System/Library/CoreServices"), enabled = core.appending("SystemVersion.plist"), disabled = core.appending("SystemVersion-disabled.plist")
-        if !fm.fileExists(atPath: enabled.path) && fm.fileExists(atPath: disabled.path) { try fm.moveItem(at: disabled, to: enabled) }
-        if recovery {
-            events(InstallEvent(.reducedSecurity)); try commands.authenticated("/usr/bin/bputil", ["-g", "-v", os.vgid], credentials: credentials)
-        }
-        events(InstallEvent(.defaultBoot))
-        _ = try commands.run("/usr/sbin/bless", ["--setBoot", "--device", "/dev/" + os.systemDevice, "--user", credentials.username, "--stdinpass"], input: Data(credentials.password.utf8))
-        if fm.fileExists(atPath: enabled.path) { if fm.fileExists(atPath: disabled.path) { try fm.removeItem(at: disabled) }; try fm.moveItem(at: enabled, to: disabled) }
-        let media = os.system.appending(".IAPhysicalMedia"), disabledMedia = os.system.appending("IAPhysicalMedia-disabled.plist")
-        if !fm.fileExists(atPath: media.path), fm.fileExists(atPath: disabledMedia.path) { try fm.moveItem(at: disabledMedia, to: media) }
+        _ = try StartupVolume(system: os.system, group: os.vgid, name: os.label)
+            .prepareRecovery(credentials: credentials, recovery: recovery, commands: commands, events: events) { selected in
+                log.bootSelection(target: selected.targetGroup, selected: selected.selectedGroup, device: selected.device)
+            }
     }
     public func stage2Status() throws -> Stage2Status {
         if configuration.demo { return Stage2Status(name: "Gravity Linux", ready: true, in1TR: true, paired: true, complete: false, board: try demoBoard().presentation, boardProfileID: try demoBoard().id) }

@@ -189,6 +189,33 @@ func stage2Fixture(_ temp: TemporaryDirectory) throws -> URL {
     try write(Data(text.utf8), to: script); try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
     try SystemCommands().authenticated(script.path, [], credentials: Credentials(username: "fixture-user", password: "fixture-password"))
 }
+@Test(arguments: [false, true]) func realPTYCompletesKMUtilTransaction(fragmented: Bool) throws {
+    let temp = try TemporaryDirectory(), script = temp.url.appending("kmutil-fixture.sh")
+    // Match the Recovery transcript, including a prompt split across PTY reads.
+    // Bound each read so a parser regression fails without a two-minute stall.
+    let confirmation = fragmented
+        ? "printf 'Are you sure you want to do this? (enter y or '; sleep 0.2; printf 'n) '"
+        : "printf 'Are you sure you want to do this? (enter y or n) '"
+    let text = """
+    #!/bin/bash
+    printf 'By setting a custom boot object, you will be putting your system into Permissive Security.\\n\\n'
+    \(confirmation)
+    read -r -t 5 confirmation || exit 10
+    [ "$confirmation" = y ] || exit 11
+    printf 'found valid Mach-O binary, deriving Mach-O boot properties...\\nwrapping boot object payload...\\ngoing to change bootpolicy to permissive...\\nupdating local machine policy...\\nUsername: '
+    read -r -t 5 username || exit 12
+    [ "$username" = fixture-user ] || exit 13
+    printf 'Password: '
+    sleep 0.2
+    stty -echo
+    read -r -t 5 password || exit 14
+    stty echo
+    [ "$password" = fixture-password ] || exit 15
+    printf '\\ninstalling boot object...\\ndone.\\n'
+    """
+    try write(Data(text.utf8), to: script); try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
+    try SystemCommands().authenticated(script.path, [], credentials: Credentials(username: "fixture-user", password: "fixture-password"))
+}
 @Test func demoPlansValidateBoundsAndCannotBeReused() async throws {
     var config = EngineConfiguration(resourceDirectory: URL(fileURLWithPath: "/does-not-exist")); config.demo = true
     let engine = InstallerEngine(configuration: config); var inspection = try await engine.inspect(); inspection.software = try await engine.availableSoftware()

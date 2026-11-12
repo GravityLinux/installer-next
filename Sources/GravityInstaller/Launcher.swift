@@ -20,12 +20,17 @@ struct LaunchOptions {
     var latestURL: URL?
     var forceDeployment = false
     private var catalogOverridden = false, repositoryOverridden = false
-    init(_ arguments: [String] = Array(CommandLine.arguments.dropFirst()), preferences: DeveloperPreferences? = nil) throws {
+    init(_ arguments: [String] = Array(CommandLine.arguments.dropFirst()), preferences: DeveloperPreferences? = nil, resourceDirectory: URL? = nil) throws {
         let bundle = Bundle.main.bundleURL.pathExtension == "app" ? Bundle.main.bundleURL : nil
-        let resources = Bundle.main.resourceURL ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Resources")
+        let resources = resourceDirectory ?? Bundle.main.resourceURL ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Resources")
         let stage2 = resources.appendingPathComponent("stage2.json")
         configuration = EngineConfiguration(resourceDirectory: resources, appBundle: bundle, stage2URL: FileManager.default.fileExists(atPath: stage2.path) ? stage2 : nil)
         configuration.demo = Bundle.main.object(forInfoDictionaryKey: "GravityDemo") as? Bool == true
+        // Asahi's Recovery app wrapper discards its launch arguments. Recovery
+        // can supply AppKit/LaunchServices arguments that are not installer CLI
+        // options. Tolerate those only for the embedded graphical launcher.
+        let clientModes: Set<String> = ["--tui", "--api", "--inspect", "--version", "--help", "-h", "--fwextract", "--handoff-bundle", "--deploy-app", "--render-preview", "--check-window-close"]
+        let recoveryGUI = configuration.stage2URL != nil && !arguments.contains(where: clientModes.contains)
         if let bundle, let distribution = try InstallerDistribution.read(from: bundle) {
             if let url = distribution.catalogURL { configuration.catalogURL = url }
             if let url = distribution.repositoryURL { configuration.repositoryURL = url }
@@ -84,7 +89,7 @@ struct LaunchOptions {
             case "--latest-url": latestURL = URL(string: try value())
             case "--force-deploy": forceDeployment = true
             case "--help", "-h": help = true
-            default: throw InstallerError("Unknown option: \(arguments[i])")
+            default: if !recoveryGUI { throw InstallerError("Unknown option: \(arguments[i])") }
             }
             i += 1
         }

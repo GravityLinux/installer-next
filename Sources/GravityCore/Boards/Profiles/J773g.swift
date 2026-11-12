@@ -6,7 +6,7 @@ enum J773g {
 
     static let profile = BoardProfile(
         id: "j773g", deviceClass: "j773gap", chipID: 0x8132,
-        minimumMacOS: "26.5", restore: restore, firmwareMachine: "j773g",
+        minimumMacOS: "26.5", minimumSystemFirmware: "26.6.2", restore: restore, firmwareMachine: "j773g",
         firmware: J773gFirmware(),
         presentation: BoardPresentation(symbol: "macmini", status: "Alpha",
             notes: "Boots and runs. Not ready to be a daily driver yet.",

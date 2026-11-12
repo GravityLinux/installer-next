@@ -13,7 +13,7 @@ import Testing
     #expect(J700.profile.installationModes.contains(.linux))
 }
 
-private func j700Setfile(_ fill: UInt8) -> Data {
+func j700Setfile(_ fill: UInt8) -> Data {
     var result = Data(count: J700FirmwareCollectors.cameraSize)
     for (i, n) in [0x19250306, 0x04050000, 0, 0, 0x21000000, 0x641e0000, 0, 0x03c00000].enumerated() {
         for j in 0..<4 { result[i * 4 + j] = UInt8(truncatingIfNeeded: n >> ((3-j)*8)) }
@@ -56,7 +56,7 @@ private func j700Setfile(_ fill: UInt8) -> Data {
     #expect(throws: (any Error).self) { try J700FirmwareCollectors.validateCalibration(files(), address: address, factory: rf) }
 }
 
-private func factoryOCATable() -> Data {
+func factoryOCATable() -> Data {
     let sizes = [(0x1001, 328), (0x1002, 20), (0x1003, 20), (0x1011, 336), (0x1012, 320), (0x1021, 336), (0x1022, 600),
         (0x2000, 1584), (0x2080, 712), (0x2008, 2160), (0x2010, 2160), (0x201c, 2160),
         (0x4006, 20), (0x3086, 2448), (0x3006, 4896), (0x420f, 20), (0x320f, 1224)]
@@ -71,7 +71,7 @@ private func factoryOCATable() -> Data {
     }
     return table + bodies
 }
-private func factoryBWC2(_ table: Data, duplicate: Bool = false) throws -> Data {
+func factoryBWC2(_ table: Data, duplicate: Bool = false) throws -> Data {
     let record = seq([integer(try Data("OCA2".utf8).uint(0, 4)), ascii("."), der(4, table)])
     let wcal = seq([integer(try Data("WCAL".utf8).uint(0, 4)), ascii("."), der(4, Data("BLOB".utf8) + Data(count: 12))])
     let contents = der(0x31, record + (duplicate ? record : Data()) + wcal)

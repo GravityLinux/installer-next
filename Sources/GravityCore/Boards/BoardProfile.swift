@@ -115,6 +115,7 @@ public struct BoardProfile: Sendable {
     public let chipID: Int64
     public let boardIDs: Set<Int64>?
     public let minimumMacOS: String
+    public let minimumSystemFirmware: String?
     public let restore: RestoreProfile
     public let firmwareMachine: String
     public let firmware: any BoardFirmwareLoading
@@ -127,13 +128,14 @@ public struct BoardProfile: Sendable {
     /// New boards require an explicit supported_boards/supported_devices match.
     public let acceptsUnscopedImages: Bool
     public init(id: String, deviceClass: String, chipID: Int64, boardIDs: Set<Int64>? = nil,
-                minimumMacOS: String, restore: RestoreProfile, firmwareMachine: String,
+                minimumMacOS: String, minimumSystemFirmware: String? = nil, restore: RestoreProfile, firmwareMachine: String,
                 firmware: any BoardFirmwareLoading, boot: BoardBootAssets = BoardBootAssets(),
                 storage: BoardStoragePolicy = BoardStoragePolicy(), presentation: BoardPresentation,
                 installationModes: Set<InstallationMode> = [.linux, .uefi, .bootloader],
                 availability: BoardAvailability = .standard, acceptsUnscopedImages: Bool = false) {
         self.id = id; self.deviceClass = deviceClass.lowercased(); self.chipID = chipID; self.boardIDs = boardIDs
         self.minimumMacOS = minimumMacOS; self.restore = restore; self.firmwareMachine = firmwareMachine
+        self.minimumSystemFirmware = minimumSystemFirmware
         self.firmware = firmware; self.boot = boot; self.storage = storage
         var presentation = presentation; presentation.productNumber = id; self.presentation = presentation
         self.installationModes = installationModes
@@ -149,6 +151,7 @@ public struct BoardProfile: Sendable {
         }
         try require(!deviceClass.isEmpty && chipID > 0 && boardIDs?.isEmpty != true, "Invalid hardware match in board profile \(id)")
         try require(!minimumMacOS.isEmpty && !restore.version.isEmpty && !restore.member.isEmpty, "Missing version or recovery member for \(id)")
+        if let minimumSystemFirmware { try require(SystemFirmware.components(minimumSystemFirmware) != nil, "Invalid system firmware requirement for \(id)") }
         try require(storage.stubBytes > 0 && storage.macOSReserveBytes >= 0 && storage.minimumLinuxBytes >= 0, "Invalid storage policy for \(id)")
         let alignment = boot.registration.alignment
         try require(alignment > 0 && alignment <= 16 * 1024 * 1024 && alignment & (alignment - 1) == 0, "Boot object alignment must be a bounded power of two")

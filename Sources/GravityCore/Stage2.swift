@@ -51,7 +51,7 @@ struct Stage2Context {
         if fm.fileExists(atPath: isc.appending("boot").path) {
             events(InstallEvent(.externalPreboot))
             let disk = DiskManager(commands: commands); let preboot = try disk.mount(record.prebootUUID)
-            try copy(preboot.appending("\(record.vgid)/var"), isc.appending("var"))
+            try copyMergingDirectory(preboot.appending("\(record.vgid)/var"), isc.appending("var"))
         }
         events(InstallEvent(.registerBoot))
         let args = board.boot.registration.arguments(bootObject: resources.appending("boot.bin"), system: system)

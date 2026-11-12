@@ -22,6 +22,25 @@ func copy(_ from: URL, _ to: URL) throws {
     if fm.fileExists(atPath: to.path) { try fm.removeItem(at: to) }
     try fm.copyItem(at: from, to: to)
 }
+/// Match the directory merge used by Asahi's external-Preboot cp -R workaround.
+/// Keep destination files that are absent from the source, and do not traverse
+/// a destination symlink while copying authentication metadata.
+func copyMergingDirectory(_ from: URL, _ to: URL) throws {
+    let sourceType = try fm.attributesOfItem(atPath: from.path)[.type] as? FileAttributeType
+    let destinationType = (try? fm.attributesOfItem(atPath: to.path)[.type]) as? FileAttributeType
+    if sourceType == .typeDirectory {
+        try require(destinationType == nil || destinationType == .typeDirectory, "Cannot merge Preboot metadata into a file or symbolic link")
+        if destinationType == nil { try copy(from, to); return }
+        for child in try fm.contentsOfDirectory(at: from, includingPropertiesForKeys: nil) {
+            try copyMergingDirectory(child, to.appending(child.lastPathComponent))
+        }
+    } else {
+        try require(destinationType != .typeDirectory, "Cannot replace a Preboot metadata directory with a file")
+        try mkdir(to.deletingLastPathComponent())
+        if destinationType != nil { try fm.removeItem(at: to) }
+        try fm.copyItem(at: from, to: to)
+    }
+}
 func plist(_ data: Data) throws -> [String: Any] {
     guard let value = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
         throw InstallerError("Expected a property list dictionary")
@@ -167,7 +186,7 @@ extension SystemCommands {
                     passwords += 1; try require(passwords <= 3, "Apple rejected the administrator password")
                     response = credentials.password; passwordSent = true
                 } else if echo == 1 {
-                    if prompt.range(of: #"(\([yn]/[yn]\)|\[[yn]/[yn]\]|\byes/no\b|type ['\"]?y['\"]? to|enter ['\"]?y['\"]? to)"#, options: .regularExpression) != nil {
+                    if prompt.range(of: #"(\([yn]/[yn]\)|\[[yn]/[yn]\]|\byes/no\b|\b(?:type|enter) ['\"]?y['\"]? (?:to\b|or ['\"]?n['\"]?\s*\)))"#, options: .regularExpression) != nil {
                         response = "y"
                     } else if prompt.range(of: #"(user ?name|user)[^\r\n]*[:?]\s*$"#, options: .regularExpression) != nil { response = credentials.username }
                 }

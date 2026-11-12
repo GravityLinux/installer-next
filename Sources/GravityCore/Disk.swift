@@ -34,8 +34,7 @@ struct MacSystem {
         let bootPath = text(chosen["boot-objects-path"]).components(separatedBy: "/")
         bootVGID = !associated.isEmpty ? associated : (bootPath.count > 1 ? bootPath[1] : bootUUID)
         let nvram = try plist(commands.run("/usr/sbin/nvram", ["-xp"], input: nil))
-        let boot = text(nvram["boot-volume"]).components(separatedBy: ":")
-        defaultBoot = boot.count >= 3 ? boot[2] : ""
+        defaultBoot = StartupVolume.defaultGroup(in: nvram)
         var policy = ""
         for vgid in [bootVGID, defaultBoot] where !readOnly && !vgid.isEmpty {
             if let data = try? commands.run("/usr/bin/bputil", ["-d", "-v", vgid], input: nil) { policy = String(decoding: data, as: UTF8.self); break }
@@ -65,8 +64,9 @@ struct MacSystem {
         }
         return "Unknown"
     }
-    func validate(board: BoardProfile) throws {
+    func validate(board: BoardProfile, commands: any CommandRunning) throws {
         try require(board.matches(hardware), "The selected board profile does not match this Mac")
+        try SystemFirmware.validate(minimum: board.minimumSystemFirmware, commands: commands)
         try require(versionAtLeast(macOS, board.minimumMacOS), "Update macOS to \(board.minimumMacOS) or later before installing")
         try require(bootMode != "Unknown", "Could not determine the current boot environment")
         if bootMode == "macOS" { try require(!loginUser.isEmpty && !["unknown", "_mbsetupuser"].contains(loginUser), "A macOS administrator must be logged in at the local console") }

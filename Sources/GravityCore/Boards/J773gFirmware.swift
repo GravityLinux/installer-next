@@ -150,15 +150,18 @@ enum J773gFirmwareCollectors {
 
 
 struct J773gFirmware: BoardFirmwareLoading {
+    let factory: URL
+    init(factory: URL = URL(fileURLWithPath: RadioCalibration.factoryPath)) { self.factory = factory }
     func validateRecovery(_ context: FirmwareValidationContext, events: EventSink) throws {
         _ = try J773gFirmwareCollectors.wifi(J773gFirmwareCollectors.wifiSource(context.recovery))
         _ = try J773gFirmwareCollectors.bluetooth(context.recovery.appending("usr/share/firmware/bluetooth"))
     }
     func collect(_ context: FirmwareCollectionContext, into package: FirmwarePackage, events: EventSink) throws -> [FirmwareArchiveSource] {
         events(InstallEvent(.calibration))
+        var calibrations: [RadioCalibration] = []
         for kind in RadioKind.allCases {
-            if let calibration = try RadioCalibration.collect(kind, tree: context.deviceTree) {
-                try package.add(calibration.file); try calibration.writeRaw(to: context.raw)
+            if let calibration = try RadioCalibration.collect(kind, factory: factory, tree: context.deviceTree) {
+                calibrations.append(calibration); try calibration.writeRaw(to: context.raw)
             }
         }
         try mkdir(context.raw.appending("apple"))
@@ -167,6 +170,9 @@ struct J773gFirmware: BoardFirmwareLoading {
         try package.add(J773gFirmwareCollectors.wifi(wifi))
         events(InstallEvent(.bluetooth, help: "Collecting the matching BCM4388C2 Sakhalin AMKOR firmware and patch table."))
         try package.add(J773gFirmwareCollectors.bluetooth(context.recovery.appending("usr/share/firmware/bluetooth")))
+        // Keep package ordering identical to both archive rebuilds and the
+        // Linux consumer, including manifest hardlink targets.
+        try package.add(calibrations.map(\.file))
         events(InstallEvent(.multitouch)); try package.add(Multitouch.files(context.fud))
         guard let kernel = context.kernel else { throw InstallerError("Missing kernel cache for ASMedia firmware") }
         events(InstallEvent(.kernel, help: "Extracting the ASMedia USB firmware from Apple’s kernel cache."))

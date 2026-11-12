@@ -125,6 +125,32 @@ recovery runs as root and accepts the paired macOS administrator's credentials.
 1TR is a new boot session and asks once again. Passwords are never written to
 arguments, environment variables, state files or logs.
 
+During Gathering Information, j773g (M4) and j700 (A18 Pro) require system
+firmware from macOS 26.6.2 or later. Inspection reads `ProductVersion` from
+`/System/Volumes/iSCPreboot/SFR/current/SystemVersion.plist`, independently of
+the running macOS version and the restore used for the stub. Older, missing or
+unreadable firmware metadata stops the flow before disk discovery or downloads
+and tells the user to update macOS, restart, and try again. Firmware minimums
+are declared in each board profile and are rechecked before disk changes.
+
+The first-stage startup handoff follows Asahi's device-mode `bless` and installer
+marker ordering. It resolves the mounted System volume's current APFS group and
+device, verifies that `boot-volume` selects that group after blessing, and logs
+the expected/observed group identifiers without credentials. Failure stops before
+reporting that the paired-Recovery handoff is ready. Log copies on the ESP include
+this verification. Keep Gravity Linux as the default startup volume until 1TR
+finalization: the default determines which paired Recovery supplies the next
+power-button boot picker. Selecting another entry in an already-running picker
+does not establish that its paired Recovery is running.
+
+[The static boot-flow audit](docs/boot-flow-audit.csv) records upstream references,
+confirmed matches, remaining differences and the limits of the investigation of
+the reported macOS 26.7.2 versus stub 26.6.2 transition. The new checks diagnose an
+incorrect startup selection; they do not establish or fix an unverified firmware
+regression between those Recovery versions.
+The embedded Recovery GUI tolerates system launch arguments, as the old Recovery
+wrapper did; explicit TUI/API modes retain strict command-line validation.
+
 [The exception-state inventory](docs/installer-exception-states.csv) lists every
 identified error/alternate-flow family, its current UI surface, mutation state,
 possible actions and design notes. Some rows identify states that still need a
@@ -233,6 +259,21 @@ metadata. Success requires an archive-only rebuild to reproduce all three
 firmware outputs byte for byte. Do not confuse this with qualification of
 native Linux boot, OS installation, suspend or all wireless operating modes.
 OS choices come from the live CDN image metadata.
+
+The Linux `gravity-fwextract` consumer and its update wrapper are maintained in
+`GravityLinux/scripts`. The retired installer repository is not required.
+j700 requires the version that understands `neo-wifi`, `neo-board-data` and
+C1FE trackpad firmware; older j773g-only consumer RPMs cannot update its package.
+The Linux consumer reuses the radio caches generated locally by Swift and
+validates them against the saved factory record. macOS requires no Python.
+The archive contract and paired integration-test instructions are documented
+in that repository's `docs/swift-firmware-handoff.md`. Synthetic exports for
+those tests can be generated with:
+
+```sh
+GRAVITY_FIRMWARE_COMPAT_FIXTURES=/tmp/gravity-firmware-fixtures \
+  ./test.sh --filter exportLinuxFirmwareCompatibilityFixtures
+```
 
 ## Legal
 

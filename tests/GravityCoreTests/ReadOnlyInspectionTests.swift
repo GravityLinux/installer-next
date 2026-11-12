@@ -13,6 +13,7 @@ private final class ReadOnlyInspectionCommands: CommandRunning, @unchecked Senda
     let group = "00000000-1111-2222-3333-444444444444"
     var calls: [(String, [String])] = []
     var capacityFree: Int64 = 200_000_000_000
+    var systemFirmware: String = "26.6.2"
     init(root: URL) { self.root = root }
     func run(_ executable: String, _ arguments: [String], input: Data?) throws -> Data {
         calls.append((executable, arguments))
@@ -22,6 +23,9 @@ private final class ReadOnlyInspectionCommands: CommandRunning, @unchecked Senda
             value = ["IORegistryEntryChildren": [["IOObjectClass": "IOPlatformExpertDevice", "compatible": Data("testreadonlyap\0".utf8),
                 "IORegistryEntryChildren": [["IORegistryEntryName": "chosen", "chip-id": chip, "board-id": board, "boot-uuid": Data(group.utf8)],
                     ["IORegistryEntryName": "product", "product-name": Data("Test Mac".utf8)]]]]]
+        } else if executable.hasSuffix("plutil") {
+            #expect(arguments == ["-convert", "xml1", "-o", "-", SystemFirmware.versionPath])
+            value = ["ProductVersion": systemFirmware]
         } else if executable.hasSuffix("nvram") { value = ["boot-volume": "a:b:" + group] }
         else if executable.hasSuffix("scutil") { return Data("kCGSSessionUserNameKey : testadmin\n".utf8) }
         else if executable.hasSuffix("diskutil") {
@@ -58,12 +62,23 @@ private final class ReadOnlyInspectionCommands: CommandRunning, @unchecked Senda
     try mkdir(temp.url.appending("System/Library")); try mkdir(temp.url.appending("Data"))
     try writePlist(["ProductVersion": "1.0"], temp.url.appending("System/System/Library/CoreServices/SystemVersion.plist"))
     try writePlist(["testadmin": [:]], temp.url.appending("Preboot/\(commands.group)/var/db/AdminUserRecoveryInfo.plist"))
-    let profile = BoardProfile(id: "testreadonly", deviceClass: "testreadonlyap", chipID: 0xf001, minimumMacOS: "1.0",
+    let profile = BoardProfile(id: "testreadonly", deviceClass: "testreadonlyap", chipID: 0xf001, minimumMacOS: "1.0", minimumSystemFirmware: "26.6.2",
         restore: RestoreProfile(version: "1.0", url: URL(fileURLWithPath: "/unused.ipsw"), member: "unused.dmg", decodedSHA256: String(repeating: "0", count: 64), encoding: .dmg),
         firmwareMachine: "testreadonly", firmware: UnusedFirmware(), presentation: BoardPresentation(status: "Test", notes: "", powerButtonHelp: ""))
     let catalog = temp.url.appending("images.json")
     var config = EngineConfiguration(resourceDirectory: temp.url, catalogURL: catalog); config.developer = true
     let engine = InstallerEngine(configuration: config, commands: commands, boards: try BoardRegistry(profiles: [profile]))
+    // Even when the running OS is current, stale SFR must stop inspection
+    // before disk discovery, downloads, authorization or installation work.
+    for version in ["26.6.1", "unreadable"] {
+        commands.systemFirmware = version; commands.calls = []
+        do { _ = try await engine.inspect(); Issue.record("Firmware prerequisite was not enforced during inspection") }
+        catch { #expect(error.localizedDescription.contains("Update macOS")) }
+        #expect(!commands.calls.contains { $0.0.hasSuffix("diskutil") && $0.1 != ["info", "-plist", "/"] })
+        #expect(!commands.calls.contains { $0.0.hasSuffix("bputil") || $0.1.first == "mount" })
+        #expect(!fm.fileExists(atPath: catalog.path))
+    }
+    commands.systemFirmware = "26.6.2"
     let info = try await engine.inspect(), target = try #require(info.targets.first)
     #expect(info.administrator == "testadmin" && info.software.isEmpty)
     #expect(!fm.fileExists(atPath: catalog.path)) // Startup cannot have queried this missing source.

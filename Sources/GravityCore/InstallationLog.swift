@@ -24,5 +24,12 @@ final class InstallationLog: @unchecked Sendable {
         let line = "\(ISO8601DateFormatter().string(from: Date())) \(event.step.rawValue) \(event.title)\(verbose ? event.detail.map { " " + $0 } ?? "" : "")\n"
         try? handle?.write(contentsOf: Data(line.utf8))
     }
+    func bootSelection(target: String, selected: String, device: String) {
+        lock.lock(); defer { lock.unlock() }
+        let observed = UUID(uuidString: selected)?.uuidString ?? "unavailable"
+        let matches = target.caseInsensitiveCompare(selected) == .orderedSame
+        let line = "\(ISO8601DateFormatter().string(from: Date())) startup-selection target=\(target) selected=\(observed) system=\(device) matches=\(matches)\n"
+        try? handle?.write(contentsOf: Data(line.utf8))
+    }
     deinit { try? handle?.close() }
 }

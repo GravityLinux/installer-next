@@ -9,6 +9,7 @@ enum HandoffBundle {
         try require(!fm.fileExists(atPath: destination.path), "Handoff destination already exists")
         events(InstallEvent(.inspecting))
         let system = try MacSystem(commands: commands), board = try boards.resolve(system.hardware, developer: developer)
+        try SystemFirmware.validate(minimum: board.minimumSystemFirmware, commands: commands)
         try require(versionAtLeast(system.macOS, board.minimumMacOS), "Update macOS before collecting this board’s firmware")
         let temp = try TemporaryDirectory(prefix: "gravity-handoff"), raw = temp.url.appending("raw")
         let output = temp.url.appending("output"), fud = temp.url.appending("fud_firmware")
@@ -43,6 +44,9 @@ enum HandoffBundle {
         try FirmwarePipeline.collect(board: board, hardware: system.hardware, context: context, destination: output,
             archive: output.appending("all_firmware.tar.gz"), commands: commands, events: events)
         try mount.detach()
+        // Linux's j773g extractor also needs the saved kernelcache alongside
+        // all_firmware.tar.gz. Ordinary installations copy it via installerData.
+        if let kernel { try copy(kernel, output.appending(kernel.lastPathComponent)) }
         // Rebuild immediately using the archive alone, including the firmware
         // loader’s saved-data validation. This catches missing archive inputs.
         let rebuilt = temp.url.appending("rebuilt")
